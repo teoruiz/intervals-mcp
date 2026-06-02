@@ -23,6 +23,26 @@ make run
 
 The MCP endpoint is `/mcp`. The OAuth consent page is `/oauth/consent`.
 
+## Local (unauthenticated) MCP
+
+For local use you can skip Supabase/OIDC entirely and run the same read-only tools over plain HTTP. Only the Intervals fields in `.env` are required (`INTERVALS_ICU_API_KEY`, `INTERVALS_ICU_ATHLETE_ID`, and optionally `INTERVALS_ICU_BASE_URL`).
+
+```sh
+make run-local
+# or
+go run -buildvcs=false ./cmd/intervals-mcp --local
+```
+
+This serves the MCP endpoint at `http://127.0.0.1:8080/mcp` with **no authentication** and binds to loopback by default. Override the listen address with `--addr` (or `MCP_ADDR`) and the dotenv path with `--env PATH`.
+
+Register it with an MCP client, for example Claude Code:
+
+```sh
+claude mcp add --transport http intervals http://127.0.0.1:8080/mcp
+```
+
+> The local server is unauthenticated. Keep it bound to `127.0.0.1`: anything that can reach the address has full read access to the configured athlete's data.
+
 ## CLI
 
 The read-only CLI uses the same Intervals client and insights service as the MCP server, but it only requires the Intervals fields in `.env`:

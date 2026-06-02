@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,28 +26,56 @@ import (
 	"github.com/teoruiz/intervals-mcp/internal/oauthui"
 )
 
+const defaultLocalAddr = "127.0.0.1:8080"
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	if err := run(logger); err != nil {
+	if err := run(logger, os.Args[1:]); err != nil {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger) error {
-	cfg, err := config.Load(".env")
+type options struct {
+	Local   bool
+	Addr    string
+	EnvPath string
+}
+
+func parseFlags(args []string) (options, error) {
+	fs := flag.NewFlagSet("intervals-mcp", flag.ContinueOnError)
+	opts := options{EnvPath: ".env"}
+	fs.BoolVar(&opts.Local, "local", false, "run an unauthenticated MCP server for local use (no Supabase/OIDC)")
+	fs.StringVar(&opts.Addr, "addr", "", "override the listen address (local mode defaults to "+defaultLocalAddr+", otherwise MCP_ADDR)")
+	fs.StringVar(&opts.EnvPath, "env", ".env", "path to the dotenv file to load")
+	if err := fs.Parse(args); err != nil {
+		return options{}, err
+	}
+	if fs.NArg() != 0 {
+		return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	return opts, nil
+}
+
+func run(logger *slog.Logger, args []string) error {
+	opts, err := parseFlags(args)
+	if err != nil {
+		return err
+	}
+	if opts.Local {
+		return serveLocal(logger, opts)
+	}
+	return serveAuthenticated(logger, opts)
+}
+
+func serveAuthenticated(logger *slog.Logger, opts options) error {
+	cfg, err := config.Load(opts.EnvPath)
 	if err != nil {
 		return err
 	}
 
 	httpClient := &http.Client{Timeout: cfg.RequestTimeout}
-	intervalsClient, err := intervals.NewClient(intervals.Config{
-		BaseURL:    cfg.IntervalsBaseURL,
-		APIKey:     cfg.IntervalsAPIKey,
-		AthleteID:  cfg.IntervalsAthleteID,
-		HTTPClient: httpClient,
-		Timeout:    cfg.RequestTimeout,
-	})
+	mcpHandler, err := buildMCPHandler(cfg, httpClient)
 	if err != nil {
 		return err
 	}
@@ -70,11 +101,6 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	service := insights.New(intervalsClient)
-	mcpServer := mcpserver.New(service)
-	mcpHandler := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
-		return mcpServer
-	}, &mcp.StreamableHTTPOptions{Stateless: true})
 	protectedMCP := mcpauth.RequireBearerToken(verifier.Verify, &mcpauth.RequireBearerTokenOptions{
 		ResourceMetadataURL: cfg.ResourceMetadataURL(),
 		Scopes:              cfg.RequiredScopes,
@@ -97,29 +123,109 @@ func run(logger *slog.Logger) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	logger.Info("starting intervals MCP server", "addr", cfg.MCPAddr, "public_url", cfg.MCPPublicURL)
+	return runHTTPServer(server, cfg.ShutdownTimeout)
+}
+
+func serveLocal(logger *slog.Logger, opts options) error {
+	cfg, err := config.LoadIntervals(opts.EnvPath)
+	if err != nil {
+		return err
+	}
+
+	httpClient := &http.Client{Timeout: cfg.RequestTimeout}
+	mcpHandler, err := buildMCPHandler(cfg, httpClient)
+	if err != nil {
+		return err
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("POST /mcp", mcpHandler)
+	mux.Handle("GET /mcp", mcpHandler)
+	mux.Handle("DELETE /mcp", mcpHandler)
+	mux.HandleFunc("GET /healthz", healthHandler)
+	mux.HandleFunc("GET /readyz", readyHandler)
+
+	addr := localAddr(opts.Addr)
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           loggingMiddleware(logger, securityHeaders(mux)),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	logger.Warn("starting local intervals MCP server with authentication disabled", "addr", addr, "endpoint", "http://"+addr+"/mcp")
+	if !isLoopbackAddr(addr) {
+		logger.Warn("local MCP server is unauthenticated and not bound to loopback; anyone who can reach this address has full read access to the configured Intervals.icu athlete", "addr", addr)
+	}
+	return runHTTPServer(server, cfg.ShutdownTimeout)
+}
+
+func buildMCPHandler(cfg config.Config, httpClient *http.Client) (http.Handler, error) {
+	intervalsClient, err := intervals.NewClient(intervals.Config{
+		BaseURL:    cfg.IntervalsBaseURL,
+		APIKey:     cfg.IntervalsAPIKey,
+		AthleteID:  cfg.IntervalsAthleteID,
+		HTTPClient: httpClient,
+		Timeout:    cfg.RequestTimeout,
+	})
+	if err != nil {
+		return nil, err
+	}
+	service := insights.New(intervalsClient)
+	mcpServer := mcpserver.New(service)
+	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+		return mcpServer
+	}, &mcp.StreamableHTTPOptions{Stateless: true}), nil
+}
+
+func runHTTPServer(server *http.Server, shutdownTimeout time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("starting intervals MCP server", "addr", cfg.MCPAddr, "public_url", cfg.MCPPublicURL)
 		errCh <- server.ListenAndServe()
 	}()
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return err
-		}
-		return nil
+		return server.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
 	}
+}
+
+func localAddr(flagAddr string) string {
+	if strings.TrimSpace(flagAddr) != "" {
+		return flagAddr
+	}
+	if value, ok := os.LookupEnv("MCP_ADDR"); ok && strings.TrimSpace(value) != "" {
+		return value
+	}
+	return defaultLocalAddr
+}
+
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func protectedResourceHandler(cfg config.Config) http.HandlerFunc {

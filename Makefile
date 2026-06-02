@@ -5,7 +5,7 @@ GOLANGCI_LINT_CACHE ?= /tmp/golangci-lint-cache
 PREK ?= prek
 PREK_HOME ?= /tmp/prek-cache
 
-.PHONY: fmt fix test vet lint check run hooks precommit
+.PHONY: fmt fix test vet lint check run run-local hooks precommit
 
 fmt:
 	gofmt -w .
@@ -32,3 +32,6 @@ precommit:
 
 run:
 	GOCACHE=$(GOCACHE) $(GO) run $(GOBUILDVCS) ./cmd/intervals-mcp
+
+run-local:
+	GOCACHE=$(GOCACHE) $(GO) run $(GOBUILDVCS) ./cmd/intervals-mcp --local
