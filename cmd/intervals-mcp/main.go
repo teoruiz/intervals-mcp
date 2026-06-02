@@ -128,6 +128,8 @@ func serveAuthenticated(logger *slog.Logger, opts options) error {
 }
 
 func serveLocal(logger *slog.Logger, opts options) error {
+	envAddr, envAddrSet := os.LookupEnv("MCP_ADDR")
+
 	cfg, err := config.LoadIntervals(opts.EnvPath)
 	if err != nil {
 		return err
@@ -146,7 +148,7 @@ func serveLocal(logger *slog.Logger, opts options) error {
 	mux.HandleFunc("GET /healthz", healthHandler)
 	mux.HandleFunc("GET /readyz", readyHandler)
 
-	addr := localAddr(opts.Addr)
+	addr := localAddr(opts.Addr, envAddr, envAddrSet)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           loggingMiddleware(logger, securityHeaders(mux)),
@@ -200,12 +202,12 @@ func runHTTPServer(server *http.Server, shutdownTimeout time.Duration) error {
 	}
 }
 
-func localAddr(flagAddr string) string {
+func localAddr(flagAddr, envAddr string, envAddrSet bool) string {
 	if strings.TrimSpace(flagAddr) != "" {
 		return flagAddr
 	}
-	if value, ok := os.LookupEnv("MCP_ADDR"); ok && strings.TrimSpace(value) != "" {
-		return value
+	if envAddrSet && strings.TrimSpace(envAddr) != "" {
+		return envAddr
 	}
 	return defaultLocalAddr
 }

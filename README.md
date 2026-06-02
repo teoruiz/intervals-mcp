@@ -33,7 +33,7 @@ make run-local
 go run -buildvcs=false ./cmd/intervals-mcp --local
 ```
 
-This serves the MCP endpoint at `http://127.0.0.1:8080/mcp` with **no authentication** and binds to loopback by default. Override the listen address with `--addr` (or `MCP_ADDR`) and the dotenv path with `--env PATH`.
+This serves the MCP endpoint at `http://127.0.0.1:8080/mcp` with **no authentication** and binds to loopback by default. Override the listen address with `--addr` or a shell `MCP_ADDR` value, and the dotenv path with `--env PATH`. `MCP_ADDR` values loaded from `.env` are ignored in local mode so the shared authenticated-server config cannot expose local mode by accident.
 
 Register it with an MCP client, for example Claude Code:
 

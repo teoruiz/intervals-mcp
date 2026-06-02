@@ -49,20 +49,22 @@ func TestParseFlags(t *testing.T) {
 
 func TestLocalAddr(t *testing.T) {
 	t.Run("flag wins over env", func(t *testing.T) {
-		t.Setenv("MCP_ADDR", "0.0.0.0:7000")
-		if got := localAddr("127.0.0.1:9000"); got != "127.0.0.1:9000" {
+		if got := localAddr("127.0.0.1:9000", "0.0.0.0:7000", true); got != "127.0.0.1:9000" {
 			t.Fatalf("localAddr flag = %q, want 127.0.0.1:9000", got)
 		}
 	})
 	t.Run("env fallback", func(t *testing.T) {
-		t.Setenv("MCP_ADDR", "0.0.0.0:7000")
-		if got := localAddr(""); got != "0.0.0.0:7000" {
+		if got := localAddr("", "0.0.0.0:7000", true); got != "0.0.0.0:7000" {
 			t.Fatalf("localAddr env = %q, want 0.0.0.0:7000", got)
 		}
 	})
+	t.Run("ignores dotenv-loaded env", func(t *testing.T) {
+		if got := localAddr("", ":8080", false); got != defaultLocalAddr {
+			t.Fatalf("localAddr dotenv-loaded env = %q, want %q", got, defaultLocalAddr)
+		}
+	})
 	t.Run("default when unset", func(t *testing.T) {
-		t.Setenv("MCP_ADDR", "")
-		if got := localAddr(""); got != defaultLocalAddr {
+		if got := localAddr("", "", false); got != defaultLocalAddr {
 			t.Fatalf("localAddr default = %q, want %q", got, defaultLocalAddr)
 		}
 	})
