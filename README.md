@@ -48,6 +48,9 @@ Use `--env PATH` to load a different dotenv file and `--json` for pipeable outpu
 ## Quality Gates
 
 ```sh
+uv tool install prek
+make hooks
+make precommit
 make fix
 make fmt
 make vet
@@ -56,3 +59,4 @@ make lint
 ```
 
 `make fix` runs `go fix ./...` so new Go modernizations are applied as part of the normal workflow.
+`make hooks` installs the `prek` Git hook shim, and `make precommit` runs the configured hooks across the repository. If `prek` is already installed but older than the configured minimum, run `uv tool upgrade prek`.
