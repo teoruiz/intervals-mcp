@@ -23,6 +23,28 @@ make run
 
 The MCP endpoint is `/mcp`. The OAuth consent page is `/oauth/consent`.
 
+## CLI
+
+The read-only CLI uses the same Intervals client and insights service as the MCP server, but it only requires the Intervals fields in `.env`:
+
+- `INTERVALS_ICU_API_KEY`
+- `INTERVALS_ICU_ATHLETE_ID`
+- `INTERVALS_ICU_BASE_URL` optional, defaults to `https://intervals.icu`
+
+Examples:
+
+```sh
+go run -buildvcs=false ./cmd/intervals-cli today
+go run -buildvcs=false ./cmd/intervals-cli activities --oldest 2026-05-01 --newest 2026-06-02 --limit 10
+go run -buildvcs=false ./cmd/intervals-cli activity <id> --intervals --json
+go run -buildvcs=false ./cmd/intervals-cli recovery --date 2026-06-02
+go run -buildvcs=false ./cmd/intervals-cli calendar --category WORKOUT
+go run -buildvcs=false ./cmd/intervals-cli search ride
+go run -buildvcs=false ./cmd/intervals-cli explore
+```
+
+Use `--env PATH` to load a different dotenv file and `--json` for pipeable output.
+
 ## Quality Gates
 
 ```sh

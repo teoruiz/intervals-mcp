@@ -192,7 +192,9 @@ func (c *Client) get(ctx context.Context, apiPath string, values url.Values, out
 	if err != nil {
 		return fmt.Errorf("intervals request failed: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		_ = res.Body.Close()
+	}()
 
 	if res.StatusCode == http.StatusNotFound {
 		_, _ = io.Copy(io.Discard, res.Body)

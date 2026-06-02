@@ -176,7 +176,9 @@ func (v *JWTVerifier) getJWKSet(ctx context.Context, refresh bool) (jwkSet, erro
 	if err != nil {
 		return jwkSet{}, fmt.Errorf("fetch JWKS: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		_ = res.Body.Close()
+	}()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 		return jwkSet{}, fmt.Errorf("fetch JWKS: status %d: %s", res.StatusCode, strings.TrimSpace(string(body)))

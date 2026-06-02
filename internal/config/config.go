@@ -47,6 +47,28 @@ func Load(dotenvPath string) (Config, error) {
 		}
 	}
 
+	cfg := loadFromEnv()
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func LoadIntervals(dotenvPath string) (Config, error) {
+	if dotenvPath != "" {
+		if err := loadDotenv(dotenvPath); err != nil {
+			return Config{}, err
+		}
+	}
+
+	cfg := loadFromEnv()
+	if err := cfg.ValidateIntervals(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func loadFromEnv() Config {
 	cfg := Config{
 		IntervalsAPIKey:    env("INTERVALS_ICU_API_KEY", ""),
 		IntervalsAthleteID: env("INTERVALS_ICU_ATHLETE_ID", ""),
@@ -75,24 +97,21 @@ func Load(dotenvPath string) (Config, error) {
 	if cfg.OIDCJWKSURL == "" && cfg.OIDCIssuerURL != "" {
 		cfg.OIDCJWKSURL = cfg.OIDCIssuerURL + "/.well-known/jwks.json"
 	}
-
-	if err := cfg.Validate(); err != nil {
-		return Config{}, err
-	}
-	return cfg, nil
+	return cfg
 }
 
 func (c Config) Validate() error {
 	var errs []error
+	if err := c.ValidateIntervals(); err != nil {
+		errs = append(errs, err)
+	}
 	required := map[string]string{
-		"INTERVALS_ICU_API_KEY":                         c.IntervalsAPIKey,
-		"INTERVALS_ICU_ATHLETE_ID":                      c.IntervalsAthleteID,
-		"MCP_PUBLIC_URL":                                c.MCPPublicURL,
-		"SUPABASE_URL":                                  c.SupabaseURL,
+		"MCP_PUBLIC_URL": c.MCPPublicURL,
+		"SUPABASE_URL":   c.SupabaseURL,
 		"SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY": c.SupabaseAnonKey,
-		"OIDC_ISSUER_URL":                               c.OIDCIssuerURL,
-		"OIDC_JWKS_URL":                                 c.OIDCJWKSURL,
-		"OIDC_AUDIENCE":                                 c.OIDCAudience,
+		"OIDC_ISSUER_URL": c.OIDCIssuerURL,
+		"OIDC_JWKS_URL":   c.OIDCJWKSURL,
+		"OIDC_AUDIENCE":   c.OIDCAudience,
 	}
 	for key, value := range required {
 		if strings.TrimSpace(value) == "" {
@@ -125,6 +144,28 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
+func (c Config) ValidateIntervals() error {
+	var errs []error
+	required := map[string]string{
+		"INTERVALS_ICU_API_KEY":    c.IntervalsAPIKey,
+		"INTERVALS_ICU_ATHLETE_ID": c.IntervalsAthleteID,
+	}
+	for key, value := range required {
+		if strings.TrimSpace(value) == "" {
+			errs = append(errs, fmt.Errorf("%s is required", key))
+		}
+	}
+	if c.IntervalsBaseURL != "" {
+		if _, err := url.ParseRequestURI(c.IntervalsBaseURL); err != nil {
+			errs = append(errs, fmt.Errorf("INTERVALS_ICU_BASE_URL must be a valid URL: %w", err))
+		}
+	}
+	if c.RequestTimeout <= 0 {
+		errs = append(errs, errors.New("REQUEST_TIMEOUT must be positive"))
+	}
+	return errors.Join(errs...)
+}
+
 func (c Config) MCPResource() string {
 	return c.MCPPublicURL + "/mcp"
 }
@@ -141,8 +182,6 @@ func loadDotenv(path string) error {
 		}
 		return fmt.Errorf("open dotenv: %w", err)
 	}
-	defer file.Close()
-
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -165,7 +204,11 @@ func loadDotenv(path string) error {
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		_ = file.Close()
 		return fmt.Errorf("scan dotenv: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close dotenv: %w", err)
 	}
 	return nil
 }

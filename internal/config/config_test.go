@@ -55,3 +55,50 @@ func TestValidateRequiresSingleUserGate(t *testing.T) {
 		t.Fatal("Validate() succeeded without allowed email or subject")
 	}
 }
+
+func TestLoadIntervalsAllowsIntervalsOnlyDotenv(t *testing.T) {
+	for _, key := range []string{
+		"MCP_PUBLIC_URL",
+		"SUPABASE_URL",
+		"SUPABASE_ANON_KEY",
+		"SUPABASE_PUBLISHABLE_KEY",
+		"OIDC_ISSUER_URL",
+		"OIDC_JWKS_URL",
+		"OIDC_ALLOWED_EMAIL",
+		"OIDC_ALLOWED_SUBJECT",
+	} {
+		t.Setenv(key, "")
+	}
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	body := `
+INTERVALS_ICU_API_KEY=secret
+INTERVALS_ICU_ATHLETE_ID=i123
+INTERVALS_ICU_BASE_URL=https://intervals.example
+REQUEST_TIMEOUT=3s
+`
+	if err := os.WriteFile(envPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadIntervals(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IntervalsBaseURL != "https://intervals.example" {
+		t.Fatalf("IntervalsBaseURL = %q", cfg.IntervalsBaseURL)
+	}
+	if cfg.RequestTimeout.String() != "3s" {
+		t.Fatalf("RequestTimeout = %s", cfg.RequestTimeout)
+	}
+}
+
+func TestValidateIntervalsRequiresCredentials(t *testing.T) {
+	cfg := Config{
+		IntervalsBaseURL: "https://intervals.icu",
+		RequestTimeout:   defaultRequestTimeout,
+	}
+	if err := cfg.ValidateIntervals(); err == nil {
+		t.Fatal("ValidateIntervals() succeeded without credentials")
+	}
+}
