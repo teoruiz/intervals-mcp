@@ -29,11 +29,13 @@ type Service interface {
 }
 
 type GlobalOptions struct {
-	EnvPath string
-	JSON    bool
+	EnvPath     string
+	EnvExplicit bool
+	JSON        bool
 }
 
 type Options struct {
+	Name    string
 	JSON    bool
 	NoStyle bool
 	In      io.Reader
@@ -43,6 +45,7 @@ type Options struct {
 
 type App struct {
 	service Service
+	name    string
 	json    bool
 	style   bool
 	in      io.Reader
@@ -63,8 +66,13 @@ func New(service Service, opts Options) *App {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
+	name := strings.TrimSpace(opts.Name)
+	if name == "" {
+		name = "intervals"
+	}
 	return &App{
 		service: service,
+		name:    name,
 		json:    opts.JSON,
 		style:   !opts.NoStyle,
 		in:      in,
@@ -74,7 +82,7 @@ func New(service Service, opts Options) *App {
 }
 
 func ParseGlobals(args []string) (GlobalOptions, []string, error) {
-	opts := GlobalOptions{EnvPath: ".env"}
+	var opts GlobalOptions
 	remaining := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -90,12 +98,14 @@ func ParseGlobals(args []string) (GlobalOptions, []string, error) {
 				return opts, nil, errors.New("--env requires a path")
 			}
 			opts.EnvPath = args[i]
+			opts.EnvExplicit = true
 		case strings.HasPrefix(arg, "--env="):
 			value := strings.TrimSpace(strings.TrimPrefix(arg, "--env="))
 			if value == "" {
 				return opts, nil, errors.New("--env requires a path")
 			}
 			opts.EnvPath = value
+			opts.EnvExplicit = true
 		default:
 			remaining = append(remaining, arg)
 		}
@@ -119,7 +129,7 @@ func NeedsService(args []string) bool {
 
 func (a *App) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		_, err := io.WriteString(a.out, Usage())
+		_, err := io.WriteString(a.out, Usage(a.name))
 		return err
 	}
 
@@ -143,22 +153,22 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	case "explore":
 		return a.runExplore(ctx, commandArgs)
 	default:
-		return fmt.Errorf("unknown command %q\n\n%s", command, strings.TrimSpace(usageHint()))
+		return fmt.Errorf("unknown command %q\n\n%s", command, strings.TrimSpace(usageHint(a.name)))
 	}
 }
 
 func (a *App) runHelp(args []string) error {
 	if len(args) == 0 {
-		_, err := io.WriteString(a.out, Usage())
+		_, err := io.WriteString(a.out, Usage(a.name))
 		return err
 	}
-	_, err := io.WriteString(a.out, CommandUsage(args[0]))
+	_, err := io.WriteString(a.out, CommandUsage(a.name, args[0]))
 	return err
 }
 
 func (a *App) runToday(ctx context.Context, args []string) error {
 	if helpRequested(args) {
-		_, err := io.WriteString(a.out, CommandUsage("today"))
+		_, err := io.WriteString(a.out, CommandUsage(a.name, "today"))
 		return err
 	}
 	fs := newFlagSet("today")
@@ -184,7 +194,7 @@ func (a *App) runToday(ctx context.Context, args []string) error {
 
 func (a *App) runActivities(ctx context.Context, args []string) error {
 	if helpRequested(args) {
-		_, err := io.WriteString(a.out, CommandUsage("activities"))
+		_, err := io.WriteString(a.out, CommandUsage(a.name, "activities"))
 		return err
 	}
 	fs := newFlagSet("activities")
@@ -226,7 +236,7 @@ func (a *App) runActivities(ctx context.Context, args []string) error {
 
 func (a *App) runActivity(ctx context.Context, args []string) error {
 	if helpRequested(args) {
-		_, err := io.WriteString(a.out, CommandUsage("activity"))
+		_, err := io.WriteString(a.out, CommandUsage(a.name, "activity"))
 		return err
 	}
 	id, includeIntervals, err := parseActivityArgs(args)
@@ -272,7 +282,7 @@ func parseActivityArgs(args []string) (string, bool, error) {
 
 func (a *App) runRecovery(ctx context.Context, args []string) error {
 	if helpRequested(args) {
-		_, err := io.WriteString(a.out, CommandUsage("recovery"))
+		_, err := io.WriteString(a.out, CommandUsage(a.name, "recovery"))
 		return err
 	}
 	fs := newFlagSet("recovery")
@@ -302,7 +312,7 @@ func (a *App) runRecovery(ctx context.Context, args []string) error {
 
 func (a *App) runCalendar(ctx context.Context, args []string) error {
 	if helpRequested(args) {
-		_, err := io.WriteString(a.out, CommandUsage("calendar"))
+		_, err := io.WriteString(a.out, CommandUsage(a.name, "calendar"))
 		return err
 	}
 	fs := newFlagSet("calendar")
@@ -342,7 +352,7 @@ func (a *App) runCalendar(ctx context.Context, args []string) error {
 
 func (a *App) runSearch(ctx context.Context, args []string) error {
 	if helpRequested(args) {
-		_, err := io.WriteString(a.out, CommandUsage("search"))
+		_, err := io.WriteString(a.out, CommandUsage(a.name, "search"))
 		return err
 	}
 	query := strings.TrimSpace(strings.Join(args, " "))
@@ -362,7 +372,7 @@ func (a *App) runSearch(ctx context.Context, args []string) error {
 
 func (a *App) runExplore(ctx context.Context, args []string) error {
 	if helpRequested(args) {
-		_, err := io.WriteString(a.out, CommandUsage("explore"))
+		_, err := io.WriteString(a.out, CommandUsage(a.name, "explore"))
 		return err
 	}
 	fs := newFlagSet("explore")
@@ -789,18 +799,21 @@ func datePrefix(value string) string {
 	return value
 }
 
-func Usage() string {
-	return `Usage:
-  intervals-cli [--env PATH] [--json] today
-  intervals-cli [--env PATH] [--json] activities [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--limit N]
-  intervals-cli [--env PATH] [--json] activity <id> [--intervals]
-  intervals-cli [--env PATH] [--json] recovery [--date YYYY-MM-DD]
-  intervals-cli [--env PATH] [--json] calendar [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--category WORKOUT]
-  intervals-cli [--env PATH] [--json] search [query]
-  intervals-cli [--env PATH] [--json] explore
+func Usage(name string) string {
+	name = commandName(name)
+	return fmt.Sprintf(`Usage:
+  %[1]s [--env PATH] [--json] today
+  %[1]s [--env PATH] [--json] activities [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--limit N]
+  %[1]s [--env PATH] [--json] activity <id> [--intervals]
+  %[1]s [--env PATH] [--json] recovery [--date YYYY-MM-DD]
+  %[1]s [--env PATH] [--json] calendar [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--category WORKOUT]
+  %[1]s [--env PATH] [--json] search [query]
+  %[1]s [--env PATH] [--json] explore
+  %[1]s [--env PATH] [--json] config <init|path|doctor|show>
+  %[1]s [--env PATH] mcp stdio
 
 Global flags:
-  --env PATH  Load dotenv file. Defaults to .env.
+  --env PATH  Load a specific dotenv file instead of discovered config.
   --json      Emit JSON for scriptable output.
 
 Commands:
@@ -811,30 +824,45 @@ Commands:
   calendar    List planned events.
   search      Search recent activities, today's recovery, and upcoming events.
   explore     Pick a command interactively.
-`
+  config      Initialize, inspect, and validate config.
+  mcp         Run local MCP transports.
+`, name)
 }
 
-func CommandUsage(command string) string {
+func CommandUsage(name, command string) string {
+	name = commandName(name)
 	switch command {
 	case "today":
-		return "Usage: intervals-cli [--env PATH] [--json] today\n"
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] today\n", name)
 	case "activities":
-		return "Usage: intervals-cli [--env PATH] [--json] activities [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--limit N]\n"
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] activities [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--limit N]\n", name)
 	case "activity":
-		return "Usage: intervals-cli [--env PATH] [--json] activity <id> [--intervals]\n"
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] activity <id> [--intervals]\n", name)
 	case "recovery":
-		return "Usage: intervals-cli [--env PATH] [--json] recovery [--date YYYY-MM-DD]\n"
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] recovery [--date YYYY-MM-DD]\n", name)
 	case "calendar":
-		return "Usage: intervals-cli [--env PATH] [--json] calendar [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--category WORKOUT]\n"
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] calendar [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--category WORKOUT]\n", name)
 	case "search":
-		return "Usage: intervals-cli [--env PATH] [--json] search [query]\n"
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] search [query]\n", name)
 	case "explore":
-		return "Usage: intervals-cli [--env PATH] [--json] explore\n"
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] explore\n", name)
+	case "config":
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] config <init|path|doctor|show>\n", name)
+	case "mcp":
+		return fmt.Sprintf("Usage: %s [--env PATH] mcp stdio\n", name)
 	default:
-		return Usage()
+		return Usage(name)
 	}
 }
 
-func usageHint() string {
-	return "Run `intervals-cli help` for usage."
+func usageHint(name string) string {
+	return fmt.Sprintf("Run `%s help` for usage.", commandName(name))
+}
+
+func commandName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "intervals"
+	}
+	return name
 }

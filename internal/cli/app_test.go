@@ -21,6 +21,9 @@ func TestParseGlobalsAnywhere(t *testing.T) {
 	if opts.EnvPath != "local.env" {
 		t.Fatalf("EnvPath = %q", opts.EnvPath)
 	}
+	if !opts.EnvExplicit {
+		t.Fatal("EnvExplicit = false")
+	}
 	want := []string{"activities", "--limit", "5"}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("args = %#v", args)

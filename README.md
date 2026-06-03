@@ -16,6 +16,19 @@ The CLI uses the same read-only Intervals.icu client as the MCP server.
 You need Go 1.26.3, or the version declared in `go.mod`, plus an Intervals.icu
 API key and athlete id.
 
+Install the unified CLI with:
+
+```sh
+go install github.com/teoruiz/intervals-mcp/cmd/intervals@latest
+```
+
+Compatibility binaries remain available:
+
+```sh
+go install github.com/teoruiz/intervals-mcp/cmd/intervals-cli@latest
+go install github.com/teoruiz/intervals-mcp/cmd/intervals-mcp@latest
+```
+
 ## What It Exposes
 
 The MCP server exposes these tools:
@@ -54,34 +67,42 @@ not exposed by this project. See `docs/README.md`.
 
 ## Quick Start: Local MCP
 
-Local mode is easiest for day-to-day use on your own machine. It has no
-Supabase/OIDC auth and binds to `127.0.0.1:8080` by default.
+Stdio mode is easiest for day-to-day MCP use on your own machine. It starts on
+demand from your MCP client and does not require a separate HTTP server.
 
-1. Create your env file:
+1. Install the CLI:
 
    ```sh
-   cp .env.example .env
+   go install github.com/teoruiz/intervals-mcp/cmd/intervals@latest
    ```
 
-2. Fill in:
+2. Create your config:
 
    ```sh
-   INTERVALS_ICU_API_KEY=...
-   INTERVALS_ICU_ATHLETE_ID=...
+   intervals config init
    ```
 
-3. Start the local server:
+   This writes dotenv config to `$XDG_CONFIG_HOME/intervals-mcp/config.env`, or
+   `~/.config/intervals-mcp/config.env` when `XDG_CONFIG_HOME` is unset.
 
-   ```sh
-   make run-local
-   # or
-   go run -buildvcs=false ./cmd/intervals-mcp --local
+3. Register stdio MCP with a client using this command and args:
+
+   ```text
+   command: intervals
+   args: ["mcp", "stdio"]
    ```
 
-4. Register it with an MCP client, for example Claude Code:
+   Example MCP client JSON:
 
-   ```sh
-   claude mcp add --transport http intervals http://127.0.0.1:8080/mcp
+   ```json
+   {
+     "mcpServers": {
+       "intervals": {
+         "command": "intervals",
+         "args": ["mcp", "stdio"]
+       }
+     }
+   }
    ```
 
 Then ask your MCP client things like:
@@ -106,25 +127,45 @@ Example tool inputs, for clients that show or support direct MCP tool calls:
 {"tool": "fetch", "arguments": {"id": "activity:ACTIVITY_ID"}}
 ```
 
-Local mode is unauthenticated. Keep it bound to `127.0.0.1`; anything that can
-reach the address can read the configured athlete's data.
+If your MCP client needs HTTP instead of stdio, keep using the compatibility
+server:
+
+```sh
+intervals-mcp --local
+# or from the repo:
+go run -buildvcs=false ./cmd/intervals-mcp --local
+```
+
+Register HTTP clients at `http://127.0.0.1:8080/mcp`.
+HTTP local mode is unauthenticated. Keep it bound to `127.0.0.1`; anything that
+can reach the address can read the configured athlete's data.
 
 ## CLI Examples
 
 The CLI only needs the Intervals.icu env vars.
 
 ```sh
-go run -buildvcs=false ./cmd/intervals-cli today
-go run -buildvcs=false ./cmd/intervals-cli activities --oldest 2026-05-01 --newest 2026-06-02 --limit 10
-go run -buildvcs=false ./cmd/intervals-cli activity <id> --intervals --json
-go run -buildvcs=false ./cmd/intervals-cli recovery --date 2026-06-02
-go run -buildvcs=false ./cmd/intervals-cli calendar --category WORKOUT
-go run -buildvcs=false ./cmd/intervals-cli search ride
-go run -buildvcs=false ./cmd/intervals-cli explore
+intervals today
+intervals activities --oldest 2026-05-01 --newest 2026-06-02 --limit 10
+intervals activity <id> --intervals --json
+intervals recovery --date 2026-06-02
+intervals calendar --category WORKOUT
+intervals search ride
+intervals explore
 ```
 
-Use `--env PATH` to load a different dotenv file and `--json` for pipeable
-output.
+Useful config commands:
+
+```sh
+intervals config init
+intervals config path
+intervals config doctor
+intervals config show
+```
+
+Use `--env PATH` to load a specific dotenv file and `--json` for pipeable
+output. `intervals-cli` remains available for existing scripts, but new
+installations should use `intervals`.
 
 ## Remote MCP With Supabase
 
@@ -198,6 +239,17 @@ fly logs -a your-real-app-name
 ```
 
 ## Configuration Reference
+
+Config is dotenv-style. Effective values are loaded with this precedence:
+
+1. non-empty process environment variables;
+2. explicit `--env PATH`;
+3. `$XDG_CONFIG_HOME/intervals-mcp/config.env`, or
+   `~/.config/intervals-mcp/config.env`;
+4. repo-local `.env` for development.
+
+`intervals config init` creates config files with mode `0600`. `config show`
+redacts secrets.
 
 Required for every mode:
 
