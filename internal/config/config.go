@@ -80,7 +80,7 @@ func loadFromEnv() Config {
 
 		SupabaseURL:            trimTrailingSlash(env("SUPABASE_URL", "")),
 		SupabaseAnonKey:        firstNonEmpty(env("SUPABASE_ANON_KEY", ""), env("SUPABASE_PUBLISHABLE_KEY", "")),
-		SupabaseOAuthProviders: csv(env("SUPABASE_OAUTH_PROVIDERS", "github,google")),
+		SupabaseOAuthProviders: csv(env("SUPABASE_OAUTH_PROVIDERS", "")),
 
 		OIDCIssuerURL:    trimTrailingSlash(env("OIDC_ISSUER_URL", "")),
 		OIDCJWKSURL:      trimTrailingSlash(env("OIDC_JWKS_URL", "")),

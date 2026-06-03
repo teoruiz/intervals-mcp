@@ -5,10 +5,17 @@ GOLANGCI_LINT_CACHE ?= /tmp/golangci-lint-cache
 PREK ?= prek
 PREK_HOME ?= /tmp/prek-cache
 
-.PHONY: fmt fix test vet lint check run run-local hooks precommit
+.PHONY: fmt fmt-check fix test vet lint check run run-local hooks precommit
 
 fmt:
 	gofmt -w .
+
+fmt-check:
+	@files="$$(gofmt -l .)"; \
+	if [ -n "$$files" ]; then \
+		echo "$$files"; \
+		exit 1; \
+	fi
 
 fix:
 	GOCACHE=$(GOCACHE) $(GO) fix ./...
@@ -22,7 +29,7 @@ vet:
 lint:
 	GOCACHE=$(GOCACHE) GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) golangci-lint run
 
-check: fix fmt vet test lint
+check: fmt-check vet test lint
 
 hooks:
 	PREK_HOME=$(PREK_HOME) $(PREK) install
