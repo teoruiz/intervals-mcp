@@ -1,10 +1,9 @@
-# fly.toml app configuration file generated for intervals-mcp on 2026-06-01T13:03:33+02:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# Example Fly.io configuration for intervals-mcp.
+# Change app, primary_region, MCP_PUBLIC_URL, and scaling settings for your own deployment.
+# Store credentials with `fly secrets set`; do not put Intervals.icu or Supabase secrets here.
 
-app = 'intervals-mcp'
-primary_region = 'cdg'
+app = 'your-intervals-mcp-app'
+primary_region = 'iad'
 
 [build]
   [build.args]
@@ -12,6 +11,7 @@ primary_region = 'cdg'
 
 [env]
   MCP_ADDR = ':8080'
+  MCP_PUBLIC_URL = 'https://your-intervals-mcp-app.fly.dev'
   PORT = '8080'
 
 [http_service]
@@ -25,4 +25,3 @@ primary_region = 'cdg'
 [[vm]]
   memory = '1gb'
   cpus = 1
-  memory_mb = 1024
