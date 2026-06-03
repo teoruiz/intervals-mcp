@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -16,14 +17,11 @@ import (
 	"time"
 
 	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/teoruiz/intervals-mcp/internal/auth"
 	"github.com/teoruiz/intervals-mcp/internal/config"
-	"github.com/teoruiz/intervals-mcp/internal/insights"
-	"github.com/teoruiz/intervals-mcp/internal/intervals"
-	"github.com/teoruiz/intervals-mcp/internal/mcpserver"
 	"github.com/teoruiz/intervals-mcp/internal/oauthui"
+	appruntime "github.com/teoruiz/intervals-mcp/internal/runtime"
 )
 
 const defaultLocalAddr = "127.0.0.1:8080"
@@ -37,20 +35,32 @@ func main() {
 }
 
 type options struct {
-	Local   bool
-	Addr    string
-	EnvPath string
+	Local       bool
+	Addr        string
+	EnvPath     string
+	EnvExplicit bool
+}
+
+func newFlagSet(opts *options) *flag.FlagSet {
+	fs := flag.NewFlagSet("intervals-mcp", flag.ContinueOnError)
+	fs.BoolVar(&opts.Local, "local", false, "run an unauthenticated MCP server for local use (no Supabase/OIDC)")
+	fs.StringVar(&opts.Addr, "addr", "", "override the listen address (local mode defaults to "+defaultLocalAddr+", otherwise MCP_ADDR)")
+	fs.StringVar(&opts.EnvPath, "env", "", "path to the dotenv file to load instead of discovered config")
+	return fs
 }
 
 func parseFlags(args []string) (options, error) {
-	fs := flag.NewFlagSet("intervals-mcp", flag.ContinueOnError)
-	opts := options{EnvPath: ".env"}
-	fs.BoolVar(&opts.Local, "local", false, "run an unauthenticated MCP server for local use (no Supabase/OIDC)")
-	fs.StringVar(&opts.Addr, "addr", "", "override the listen address (local mode defaults to "+defaultLocalAddr+", otherwise MCP_ADDR)")
-	fs.StringVar(&opts.EnvPath, "env", ".env", "path to the dotenv file to load")
+	var opts options
+	fs := newFlagSet(&opts)
+	fs.SetOutput(io.Discard)
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "env" {
+			opts.EnvExplicit = true
+		}
+	})
 	if fs.NArg() != 0 {
 		return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
@@ -60,6 +70,13 @@ func parseFlags(args []string) (options, error) {
 func run(logger *slog.Logger, args []string) error {
 	opts, err := parseFlags(args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			var help options
+			fs := newFlagSet(&help)
+			fs.SetOutput(os.Stdout)
+			fs.Usage()
+			return nil
+		}
 		return err
 	}
 	if opts.Local {
@@ -69,7 +86,10 @@ func run(logger *slog.Logger, args []string) error {
 }
 
 func serveAuthenticated(logger *slog.Logger, opts options) error {
-	cfg, err := config.Load(opts.EnvPath)
+	cfg, _, err := config.LoadDiscovered(config.DiscoveryOptions{
+		EnvPath:     opts.EnvPath,
+		EnvExplicit: opts.EnvExplicit,
+	})
 	if err != nil {
 		return err
 	}
@@ -130,7 +150,10 @@ func serveAuthenticated(logger *slog.Logger, opts options) error {
 func serveLocal(logger *slog.Logger, opts options) error {
 	envAddr, envAddrSet := os.LookupEnv("MCP_ADDR")
 
-	cfg, err := config.LoadIntervals(opts.EnvPath)
+	cfg, _, err := config.LoadIntervalsDiscovered(config.DiscoveryOptions{
+		EnvPath:     opts.EnvPath,
+		EnvExplicit: opts.EnvExplicit,
+	})
 	if err != nil {
 		return err
 	}
@@ -163,21 +186,7 @@ func serveLocal(logger *slog.Logger, opts options) error {
 }
 
 func buildMCPHandler(cfg config.Config, httpClient *http.Client) (http.Handler, error) {
-	intervalsClient, err := intervals.NewClient(intervals.Config{
-		BaseURL:    cfg.IntervalsBaseURL,
-		APIKey:     cfg.IntervalsAPIKey,
-		AthleteID:  cfg.IntervalsAthleteID,
-		HTTPClient: httpClient,
-		Timeout:    cfg.RequestTimeout,
-	})
-	if err != nil {
-		return nil, err
-	}
-	service := insights.New(intervalsClient)
-	mcpServer := mcpserver.New(service)
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-		return mcpServer
-	}, &mcp.StreamableHTTPOptions{Stateless: true}), nil
+	return appruntime.NewMCPHTTPHandler(cfg, httpClient)
 }
 
 func runHTTPServer(server *http.Server, shutdownTimeout time.Duration) error {

@@ -20,11 +20,11 @@ func TestParseFlags(t *testing.T) {
 		want    options
 		wantErr bool
 	}{
-		{"defaults", nil, options{EnvPath: ".env"}, false},
-		{"local", []string{"--local"}, options{Local: true, EnvPath: ".env"}, false},
-		{"addr", []string{"--addr", "127.0.0.1:9000"}, options{Addr: "127.0.0.1:9000", EnvPath: ".env"}, false},
-		{"env", []string{"--env", "custom.env"}, options{EnvPath: "custom.env"}, false},
-		{"combined", []string{"--local", "--addr", "0.0.0.0:8080", "--env", ".env.local"}, options{Local: true, Addr: "0.0.0.0:8080", EnvPath: ".env.local"}, false},
+		{"defaults", nil, options{}, false},
+		{"local", []string{"--local"}, options{Local: true}, false},
+		{"addr", []string{"--addr", "127.0.0.1:9000"}, options{Addr: "127.0.0.1:9000"}, false},
+		{"env", []string{"--env", "custom.env"}, options{EnvPath: "custom.env", EnvExplicit: true}, false},
+		{"combined", []string{"--local", "--addr", "0.0.0.0:8080", "--env", ".env.local"}, options{Local: true, Addr: "0.0.0.0:8080", EnvPath: ".env.local", EnvExplicit: true}, false},
 		{"unknown flag", []string{"--nope"}, options{}, true},
 		{"positional arg", []string{"serve"}, options{}, true},
 	}
