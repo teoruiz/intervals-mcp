@@ -23,7 +23,7 @@ OIDC_ALLOWED_EMAIL=me@example.com
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(envPath)
+	cfg, _, err := LoadDiscovered(DiscoveryOptions{EnvPath: envPath, EnvExplicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ SUPABASE_ANON_KEY=anon
 OIDC_ALLOWED_EMAIL=me@example.com
 `)
 
-	cfg, err := Load(envPath)
+	cfg, _, err := LoadDiscovered(DiscoveryOptions{EnvPath: envPath, EnvExplicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ SUPABASE_OAUTH_PROVIDERS=github, google,,azure
 OIDC_ALLOWED_EMAIL=me@example.com
 `)
 
-	cfg, err := Load(envPath)
+	cfg, _, err := LoadDiscovered(DiscoveryOptions{EnvPath: envPath, EnvExplicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ REQUEST_TIMEOUT=3s
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadIntervals(envPath)
+	cfg, _, err := LoadIntervalsDiscovered(DiscoveryOptions{EnvPath: envPath, EnvExplicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ INTERVALS_ICU_ATHLETE_ID=file-athlete
 `)
 	t.Setenv("INTERVALS_ICU_API_KEY", "env-secret")
 
-	cfg, err := LoadIntervals(envPath)
+	cfg, _, err := LoadIntervalsDiscovered(DiscoveryOptions{EnvPath: envPath, EnvExplicit: true})
 	if err != nil {
 		t.Fatal(err)
 	}

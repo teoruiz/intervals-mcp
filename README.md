@@ -22,6 +22,14 @@ Install the unified CLI with:
 go install github.com/teoruiz/intervals-mcp/cmd/intervals@latest
 ```
 
+Until a versioned release is tagged, `@latest` resolves to the latest commit on
+the default branch. To build from a checkout instead:
+
+```sh
+git clone https://github.com/teoruiz/intervals-mcp
+go install ./cmd/intervals
+```
+
 Compatibility binaries remain available:
 
 ```sh
@@ -240,16 +248,21 @@ fly logs -a your-real-app-name
 
 ## Configuration Reference
 
-Config is dotenv-style. Effective values are loaded with this precedence:
+Config is dotenv-style. Exactly one config file is selected, in this order:
 
-1. non-empty process environment variables;
-2. explicit `--env PATH`;
-3. `$XDG_CONFIG_HOME/intervals-mcp/config.env`, or
+1. explicit `--env PATH` (must exist; it is an error if the file is missing);
+2. `$XDG_CONFIG_HOME/intervals-mcp/config.env`, or
    `~/.config/intervals-mcp/config.env`;
-4. repo-local `.env` for development.
+3. repo-local `.env` for development.
+
+The file sources do not merge: if an XDG config exists, a repo-local `.env` is
+not read. Non-empty process environment variables then override whichever file
+was selected, so they are effectively highest precedence.
 
 `intervals config init` creates config files with mode `0600`. `config show`
-redacts secrets.
+and `config doctor` redact secret keys, but print non-secret identifiers
+(athlete id, email, Supabase URL) in cleartext — scrub their output before
+pasting it into issues or logs.
 
 Required for every mode:
 

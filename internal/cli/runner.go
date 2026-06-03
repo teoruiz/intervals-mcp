@@ -21,25 +21,18 @@ import (
 type RunOptions struct {
 	Args       []string
 	BinaryName string
-	NoStyle    bool
 	In         io.Reader
 	Out        io.Writer
 	ErrOut     io.Writer
-	HTTPClient *http.Client
 	WorkDir    string
-
-	IsTerminal func(stream string) bool
 }
 
 type runner struct {
-	name       string
-	noStyle    bool
-	in         io.Reader
-	out        io.Writer
-	errOut     io.Writer
-	httpClient *http.Client
-	workDir    string
-	isTerminal func(stream string) bool
+	name    string
+	in      io.Reader
+	out     io.Writer
+	errOut  io.Writer
+	workDir string
 }
 
 func Run(ctx context.Context, opts RunOptions) error {
@@ -71,12 +64,11 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}
 
 	app := New(service, Options{
-		Name:    r.name,
-		JSON:    global.JSON,
-		NoStyle: r.noStyle,
-		In:      r.in,
-		Out:     r.out,
-		ErrOut:  r.errOut,
+		Name:   r.name,
+		JSON:   global.JSON,
+		In:     r.in,
+		Out:    r.out,
+		ErrOut: r.errOut,
 	})
 	return app.Run(ctx, commandArgs)
 }
@@ -96,14 +88,11 @@ func newRunner(opts RunOptions) *runner {
 	}
 	name := commandName(opts.BinaryName)
 	return &runner{
-		name:       name,
-		noStyle:    opts.NoStyle,
-		in:         in,
-		out:        out,
-		errOut:     errOut,
-		httpClient: opts.HTTPClient,
-		workDir:    opts.WorkDir,
-		isTerminal: opts.IsTerminal,
+		name:    name,
+		in:      in,
+		out:     out,
+		errOut:  errOut,
+		workDir: opts.WorkDir,
 	}
 }
 
@@ -144,9 +133,6 @@ func (r *runner) loadIntervals(ctx context.Context, global GlobalOptions) (confi
 }
 
 func (r *runner) interactive() bool {
-	if r.isTerminal != nil {
-		return r.isTerminal("stdin") && r.isTerminal("stdout")
-	}
 	return isTerminal(r.in) && isTerminal(r.out)
 }
 
@@ -156,9 +142,6 @@ func isTerminal(value any) bool {
 }
 
 func (r *runner) httpClientFor(cfg config.Config) *http.Client {
-	if r.httpClient != nil {
-		return r.httpClient
-	}
 	return &http.Client{Timeout: cfg.RequestTimeout}
 }
 

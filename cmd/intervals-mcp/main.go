@@ -41,13 +41,18 @@ type options struct {
 	EnvExplicit bool
 }
 
-func parseFlags(args []string) (options, error) {
+func newFlagSet(opts *options) *flag.FlagSet {
 	fs := flag.NewFlagSet("intervals-mcp", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	var opts options
 	fs.BoolVar(&opts.Local, "local", false, "run an unauthenticated MCP server for local use (no Supabase/OIDC)")
 	fs.StringVar(&opts.Addr, "addr", "", "override the listen address (local mode defaults to "+defaultLocalAddr+", otherwise MCP_ADDR)")
 	fs.StringVar(&opts.EnvPath, "env", "", "path to the dotenv file to load instead of discovered config")
+	return fs
+}
+
+func parseFlags(args []string) (options, error) {
+	var opts options
+	fs := newFlagSet(&opts)
+	fs.SetOutput(io.Discard)
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -65,6 +70,13 @@ func parseFlags(args []string) (options, error) {
 func run(logger *slog.Logger, args []string) error {
 	opts, err := parseFlags(args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			var help options
+			fs := newFlagSet(&help)
+			fs.SetOutput(os.Stdout)
+			fs.Usage()
+			return nil
+		}
 		return err
 	}
 	if opts.Local {

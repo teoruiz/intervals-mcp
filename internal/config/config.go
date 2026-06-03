@@ -22,6 +22,14 @@ const (
 
 const DefaultIntervalsBaseURL = defaultIntervalsBaseURL
 
+// ErrMissingAPIKey and ErrMissingAthleteID are returned (wrapped via
+// errors.Join) by ValidateIntervals so callers can detect the first-run
+// "no credentials yet" case with errors.Is instead of matching error text.
+var (
+	ErrMissingAPIKey    = errors.New("INTERVALS_ICU_API_KEY is required")
+	ErrMissingAthleteID = errors.New("INTERVALS_ICU_ATHLETE_ID is required")
+)
+
 type SourceKind string
 
 const (
@@ -32,10 +40,9 @@ const (
 )
 
 type Source struct {
-	Kind     SourceKind
-	Path     string
-	Explicit bool
-	Exists   bool
+	Kind   SourceKind
+	Path   string
+	Exists bool
 }
 
 type DiscoveryOptions struct {
@@ -70,30 +77,6 @@ type Config struct {
 	OIDCAllowedSub   string
 	RequestTimeout   time.Duration
 	ShutdownTimeout  time.Duration
-}
-
-func Load(dotenvPath string) (Config, error) {
-	values, err := readDotenv(dotenvPath, true)
-	if err != nil {
-		return Config{}, err
-	}
-	cfg := loadFromSources(values)
-	if err := cfg.Validate(); err != nil {
-		return Config{}, err
-	}
-	return cfg, nil
-}
-
-func LoadIntervals(dotenvPath string) (Config, error) {
-	values, err := readDotenv(dotenvPath, true)
-	if err != nil {
-		return Config{}, err
-	}
-	cfg := loadFromSources(values)
-	if err := cfg.ValidateIntervals(); err != nil {
-		return Config{}, err
-	}
-	return cfg, nil
 }
 
 func LoadEffective(opts DiscoveryOptions) (Config, Source, error) {
@@ -189,12 +172,7 @@ func WriteIntervalsConfig(path string, creds IntervalsCredentials, overwrite boo
 }
 
 func IsMissingIntervalsCredentials(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "INTERVALS_ICU_API_KEY is required") ||
-		strings.Contains(msg, "INTERVALS_ICU_ATHLETE_ID is required")
+	return errors.Is(err, ErrMissingAPIKey) || errors.Is(err, ErrMissingAthleteID)
 }
 
 func loadFromSources(values map[string]string) Config {
@@ -285,14 +263,11 @@ func (c Config) Validate() error {
 
 func (c Config) ValidateIntervals() error {
 	var errs []error
-	required := map[string]string{
-		"INTERVALS_ICU_API_KEY":    c.IntervalsAPIKey,
-		"INTERVALS_ICU_ATHLETE_ID": c.IntervalsAthleteID,
+	if strings.TrimSpace(c.IntervalsAPIKey) == "" {
+		errs = append(errs, ErrMissingAPIKey)
 	}
-	for key, value := range required {
-		if strings.TrimSpace(value) == "" {
-			errs = append(errs, fmt.Errorf("%s is required", key))
-		}
+	if strings.TrimSpace(c.IntervalsAthleteID) == "" {
+		errs = append(errs, ErrMissingAthleteID)
 	}
 	if c.IntervalsBaseURL != "" {
 		if _, err := url.ParseRequestURI(c.IntervalsBaseURL); err != nil {
@@ -321,7 +296,7 @@ func discoverValues(opts DiscoveryOptions) (Source, map[string]string, error) {
 	if !source.Exists {
 		return source, nil, nil
 	}
-	values, err := readDotenv(source.Path, !source.Explicit)
+	values, err := readDotenv(source.Path, source.Kind != SourceExplicit)
 	if err != nil {
 		return source, nil, err
 	}
@@ -335,9 +310,9 @@ func Discover(opts DiscoveryOptions) (Source, error) {
 			return Source{}, errors.New("--env requires a path")
 		}
 		if err := requireFile(path); err != nil {
-			return Source{Kind: SourceExplicit, Path: path, Explicit: true}, err
+			return Source{Kind: SourceExplicit, Path: path}, err
 		}
-		return Source{Kind: SourceExplicit, Path: path, Explicit: true, Exists: true}, nil
+		return Source{Kind: SourceExplicit, Path: path, Exists: true}, nil
 	}
 
 	if path, err := xdgConfigPath(); err == nil {

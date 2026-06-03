@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -85,7 +86,13 @@ func (r *runner) runConfigDoctor(ctx context.Context, global GlobalOptions, args
 	if err != nil {
 		return err
 	}
-	path, _ := config.ConfigPath(r.discoveryOptions(global))
+	// Report the discovered file's own path; only fall back to the canonical
+	// XDG path (where `config init` would write) when nothing was discovered,
+	// so a repo-local .env doesn't print two divergent paths.
+	path := source.Path
+	if source.Kind == config.SourceNone {
+		path, _ = config.ConfigPath(r.discoveryOptions(global))
+	}
 	result := doctorResult{
 		Source: sourceToView(source),
 		Path:   path,
@@ -171,12 +178,12 @@ func sourceToView(source config.Source) sourceView {
 	return sourceView{
 		Kind:     string(source.Kind),
 		Path:     source.Path,
-		Explicit: source.Explicit,
+		Explicit: source.Kind == config.SourceExplicit,
 		Exists:   source.Exists,
 	}
 }
 
-func writeSource(w interface{ Write([]byte) (int, error) }, source config.Source) {
+func writeSource(w io.Writer, source config.Source) {
 	if source.Exists {
 		writef(w, "Config source: %s (%s)\n", source.Path, source.Kind)
 		return
