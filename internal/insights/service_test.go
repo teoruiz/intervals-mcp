@@ -48,13 +48,78 @@ func TestTodayContextCombinesData(t *testing.T) {
 	}
 }
 
+//go:fix inline
+func ptrFloat(v float64) *float64 { return new(v) }
+
+func TestActivityWithRunningDynamics(t *testing.T) {
+	client := &fakeIntervals{
+		activity: &intervals.Activity{ID: "a1", Type: "Run"},
+		streams: []intervals.ActivityStream{
+			{Type: "GarminGCT", Data: []*float64{ptrFloat(200), nil, ptrFloat(220)}},
+			{Type: "GarminVO", Data: []*float64{ptrFloat(8), ptrFloat(10)}},
+		},
+	}
+	service := New(client)
+
+	detail, err := service.Activity(context.Background(), ActivityArgs{ID: "a1", IncludeRunningDynamics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.RunningDynamics == nil || !detail.RunningDynamics.Available {
+		t.Fatalf("RunningDynamics = %#v", detail.RunningDynamics)
+	}
+	if got := detail.RunningDynamics.GroundContactTimeMs; got == nil || *got != 210 {
+		t.Fatalf("GroundContactTimeMs = %v, want 210", got)
+	}
+	if !client.streamsCalled {
+		t.Fatal("expected GetActivityStreams to be called")
+	}
+}
+
+func TestActivityWithoutRunningDynamics(t *testing.T) {
+	client := &fakeIntervals{activity: &intervals.Activity{ID: "a1", Type: "Run"}}
+	service := New(client)
+
+	detail, err := service.Activity(context.Background(), ActivityArgs{ID: "a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.RunningDynamics != nil {
+		t.Fatalf("RunningDynamics = %#v, want nil", detail.RunningDynamics)
+	}
+	if client.streamsCalled {
+		t.Fatal("did not expect GetActivityStreams to be called")
+	}
+}
+
+func TestActivityRunningDynamicsAbsent(t *testing.T) {
+	client := &fakeIntervals{
+		activity: &intervals.Activity{ID: "a1", Type: "Run"},
+		streams:  nil,
+	}
+	service := New(client)
+
+	detail, err := service.Activity(context.Background(), ActivityArgs{ID: "a1", IncludeRunningDynamics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.RunningDynamics == nil || detail.RunningDynamics.Available {
+		t.Fatalf("RunningDynamics = %#v, want unavailable", detail.RunningDynamics)
+	}
+	if detail.RunningDynamics.Note == "" {
+		t.Fatal("expected absence note")
+	}
+}
+
 type fakeIntervals struct {
-	athlete    *intervals.Athlete
-	activities []intervals.Activity
-	activity   *intervals.Activity
-	wellness   *intervals.Wellness
-	summaries  []intervals.Summary
-	events     []intervals.Event
+	athlete       *intervals.Athlete
+	activities    []intervals.Activity
+	activity      *intervals.Activity
+	streams       []intervals.ActivityStream
+	streamsCalled bool
+	wellness      *intervals.Wellness
+	summaries     []intervals.Summary
+	events        []intervals.Event
 }
 
 func (f *fakeIntervals) GetAthlete(context.Context) (*intervals.Athlete, error) {
@@ -70,6 +135,11 @@ func (f *fakeIntervals) GetActivity(context.Context, string, bool) (*intervals.A
 		return f.activity, nil
 	}
 	return &f.activities[0], nil
+}
+
+func (f *fakeIntervals) GetActivityStreams(context.Context, string, []string) ([]intervals.ActivityStream, error) {
+	f.streamsCalled = true
+	return f.streams, nil
 }
 
 func (f *fakeIntervals) GetWellness(context.Context, string) (*intervals.Wellness, error) {

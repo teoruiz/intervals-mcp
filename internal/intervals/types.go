@@ -30,6 +30,10 @@ type Activity struct {
 	EfficiencyFactor  *float64 `json:"icu_efficiency_factor,omitempty"`
 	PowerHR           *float64 `json:"icu_power_hr,omitempty"`
 	Decoupling        *float64 `json:"decoupling,omitempty"`
+	AverageCadence    *float64 `json:"average_cadence,omitempty"` // run cadence is normalized to steps per minute; non-run cadence is raw
+	AverageStride     *float64 `json:"average_stride,omitempty"`  // meters
+	AvgLRBalance      *float64 `json:"avg_lr_balance,omitempty"`  // left/right balance percent
+	GAP               *float64 `json:"gap,omitempty"`             // grade-adjusted pace, m/s
 	PerceivedExertion *float64 `json:"perceived_exertion,omitempty"`
 	SessionRPE        *int     `json:"session_rpe,omitempty"`
 	ICURPE            *int     `json:"icu_rpe,omitempty"`

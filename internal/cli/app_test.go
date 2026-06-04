@@ -81,7 +81,7 @@ func TestActivitiesRoutesFlagsAndWritesTable(t *testing.T) {
 
 func TestActivityAllowsIntervalsAfterID(t *testing.T) {
 	service := &fakeService{
-		activity: &intervals.Activity{ID: "abc", Name: "Workout"},
+		activity: &insights.ActivityDetail{Activity: &intervals.Activity{ID: "abc", Name: "Workout"}},
 	}
 	var out bytes.Buffer
 	app := New(service, Options{NoStyle: true, Out: &out})
@@ -91,6 +91,77 @@ func TestActivityAllowsIntervalsAfterID(t *testing.T) {
 	}
 	if service.activityArgs.ID != "abc" || !service.activityArgs.IncludeIntervals {
 		t.Fatalf("activityArgs = %#v", service.activityArgs)
+	}
+}
+
+func TestActivityRendersRunningDynamics(t *testing.T) {
+	cadence := 172.0 // already normalized to steps per minute upstream
+	gct := 215.0
+	vo := 8.4
+	service := &fakeService{
+		activity: &insights.ActivityDetail{
+			Activity: &intervals.Activity{ID: "abc", Name: "Tempo", Type: "Run", AverageCadence: &cadence},
+			RunningDynamics: &intervals.RunningDynamics{
+				Available:             true,
+				GroundContactTimeMs:   &gct,
+				VerticalOscillationCm: &vo,
+			},
+		},
+	}
+	var out bytes.Buffer
+	app := New(service, Options{NoStyle: true, Out: &out})
+
+	if err := app.Run(context.Background(), []string{"activity", "abc", "--running-dynamics"}); err != nil {
+		t.Fatal(err)
+	}
+	if !service.activityArgs.IncludeRunningDynamics {
+		t.Fatalf("activityArgs = %#v", service.activityArgs)
+	}
+	got := out.String()
+	for _, want := range []string{"Cadence: 172.0 spm", "Running dynamics:", "Ground contact time: 215.0 ms", "Vertical oscillation: 8.4 cm"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestActivityRendersNonRunCadenceAsRPM(t *testing.T) {
+	cadence := 90.0
+	service := &fakeService{
+		activity: &insights.ActivityDetail{
+			Activity: &intervals.Activity{ID: "abc", Name: "Ride", Type: "Ride", AverageCadence: &cadence},
+		},
+	}
+	var out bytes.Buffer
+	app := New(service, Options{NoStyle: true, Out: &out})
+
+	if err := app.Run(context.Background(), []string{"activity", "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "Cadence: 90.0 rpm") {
+		t.Fatalf("output missing ride cadence in rpm:\n%s", got)
+	}
+	if strings.Contains(got, "Cadence: 90.0 spm") {
+		t.Fatalf("output rendered ride cadence as spm:\n%s", got)
+	}
+}
+
+func TestActivityRendersRunningDynamicsAbsentNote(t *testing.T) {
+	service := &fakeService{
+		activity: &insights.ActivityDetail{
+			Activity:        &intervals.Activity{ID: "abc", Name: "Tempo", Type: "Run"},
+			RunningDynamics: &intervals.RunningDynamics{Available: false, Note: "No Garmin running-dynamics streams found."},
+		},
+	}
+	var out bytes.Buffer
+	app := New(service, Options{NoStyle: true, Out: &out})
+
+	if err := app.Run(context.Background(), []string{"activity", "abc", "--running-dynamics"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "No Garmin running-dynamics streams found.") {
+		t.Fatalf("output missing absence note:\n%s", out.String())
 	}
 }
 
@@ -141,7 +212,7 @@ func TestRecoveryRejectsInvalidDate(t *testing.T) {
 type fakeService struct {
 	today      insights.TodayContext
 	activities insights.ActivitiesContext
-	activity   *intervals.Activity
+	activity   *insights.ActivityDetail
 	recovery   insights.RecoveryContext
 	calendar   insights.CalendarContext
 	search     insights.SearchResult
@@ -164,7 +235,7 @@ func (f *fakeService) RecentActivities(_ context.Context, args insights.RecentAc
 	return f.activities, nil
 }
 
-func (f *fakeService) Activity(_ context.Context, args insights.ActivityArgs) (*intervals.Activity, error) {
+func (f *fakeService) Activity(_ context.Context, args insights.ActivityArgs) (*insights.ActivityDetail, error) {
 	f.activityArgs = args
 	return f.activity, nil
 }

@@ -22,7 +22,7 @@ import (
 type Service interface {
 	TodayContext(context.Context, insights.TodayArgs) (insights.TodayContext, error)
 	RecentActivities(context.Context, insights.RecentActivitiesArgs) (insights.ActivitiesContext, error)
-	Activity(context.Context, insights.ActivityArgs) (*intervals.Activity, error)
+	Activity(context.Context, insights.ActivityArgs) (*insights.ActivityDetail, error)
 	Recovery(context.Context, insights.RecoveryArgs) (insights.RecoveryContext, error)
 	Calendar(context.Context, insights.CalendarArgs) (insights.CalendarContext, error)
 	Search(context.Context, insights.SearchArgs) (insights.SearchResult, error)
@@ -239,7 +239,7 @@ func (a *App) runActivity(ctx context.Context, args []string) error {
 		_, err := io.WriteString(a.out, CommandUsage(a.name, "activity"))
 		return err
 	}
-	id, includeIntervals, err := parseActivityArgs(args)
+	id, includeIntervals, includeRunningDynamics, err := parseActivityArgs(args)
 	if err != nil {
 		return err
 	}
@@ -247,8 +247,9 @@ func (a *App) runActivity(ctx context.Context, args []string) error {
 		return err
 	}
 	result, err := a.service.Activity(ctx, insights.ActivityArgs{
-		ID:               id,
-		IncludeIntervals: includeIntervals,
+		ID:                     id,
+		IncludeIntervals:       includeIntervals,
+		IncludeRunningDynamics: includeRunningDynamics,
 	})
 	if err != nil {
 		return err
@@ -260,24 +261,27 @@ func (a *App) runActivity(ctx context.Context, args []string) error {
 	return nil
 }
 
-func parseActivityArgs(args []string) (string, bool, error) {
+func parseActivityArgs(args []string) (string, bool, bool, error) {
 	var ids []string
 	includeIntervals := false
+	includeRunningDynamics := false
 	for _, arg := range args {
 		switch arg {
 		case "--intervals":
 			includeIntervals = true
+		case "--running-dynamics":
+			includeRunningDynamics = true
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return "", false, fmt.Errorf("unknown activity flag %q", arg)
+				return "", false, false, fmt.Errorf("unknown activity flag %q", arg)
 			}
 			ids = append(ids, arg)
 		}
 	}
 	if len(ids) != 1 {
-		return "", false, fmt.Errorf("activity requires exactly one activity id")
+		return "", false, false, fmt.Errorf("activity requires exactly one activity id")
 	}
-	return ids[0], includeIntervals, nil
+	return ids[0], includeIntervals, includeRunningDynamics, nil
 }
 
 func (a *App) runRecovery(ctx context.Context, args []string) error {
@@ -607,11 +611,12 @@ func writeActivities(w io.Writer, activities []intervals.Activity, style bool) {
 	_ = tw.Flush()
 }
 
-func writeActivity(w io.Writer, activity *intervals.Activity, style bool) {
-	if activity == nil {
+func writeActivity(w io.Writer, detail *insights.ActivityDetail, style bool) {
+	if detail == nil || detail.Activity == nil {
 		writeLine(w, "Activity not found.")
 		return
 	}
+	activity := detail.Activity
 	writeLine(w, title(fallback(activity.Name, "Activity"), style))
 	writef(w, "ID: %s\n", activity.ID)
 	writef(w, "Date: %s\n", fallback(activity.StartDateLocal, "-"))
@@ -621,6 +626,7 @@ func writeActivity(w io.Writer, activity *intervals.Activity, style bool) {
 	writef(w, "Training load: %s\n", intPtr(activity.TrainingLoad))
 	writef(w, "Calories: %s\n", intPtr(activity.Calories))
 	writef(w, "Heart rate: avg %s, max %s\n", intPtr(activity.AverageHeartrate), intPtr(activity.MaxHeartrate))
+	writeActivityMetrics(w, activity)
 	if len(activity.IntervalSummary) > 0 {
 		writef(w, "Interval summary: %s\n", strings.Join(activity.IntervalSummary, "; "))
 	}
@@ -629,6 +635,71 @@ func writeActivity(w io.Writer, activity *intervals.Activity, style bool) {
 	}
 	if len(activity.Tags) > 0 {
 		writef(w, "Tags: %s\n", strings.Join(activity.Tags, ", "))
+	}
+	writeRunningDynamics(w, detail.RunningDynamics)
+}
+
+// writeActivityMetrics prints cadence plus run-specific summary metrics when
+// present. Run cadence is normalized upstream; non-run cadence remains raw.
+func writeActivityMetrics(w io.Writer, activity *intervals.Activity) {
+	if activity.AverageCadence != nil {
+		unit := "rpm"
+		if intervals.IsRunType(activity.Type) {
+			unit = "spm"
+		}
+		writef(w, "Cadence: %s %s\n", floatPtr(activity.AverageCadence), unit)
+	}
+	if activity.AverageStride != nil {
+		writef(w, "Stride length: %s m\n", floatPtr(activity.AverageStride))
+	}
+	if activity.AvgLRBalance != nil {
+		writef(w, "L/R balance: %s%%\n", floatPtr(activity.AvgLRBalance))
+	}
+	if activity.GAP != nil {
+		writef(w, "GAP: %s\n", pacePtr(activity.GAP))
+	}
+}
+
+// writeRunningDynamics prints Garmin running-dynamics averages, or the absence
+// note when the streams were requested but not found.
+func writeRunningDynamics(w io.Writer, rd *intervals.RunningDynamics) {
+	if rd == nil {
+		return
+	}
+	if !rd.Available {
+		writef(w, "Running dynamics: %s\n", rd.Note)
+		return
+	}
+	writeLine(w, "Running dynamics:")
+	if rd.GroundContactTimeMs != nil {
+		writef(w, "  Ground contact time: %s ms\n", floatPtr(rd.GroundContactTimeMs))
+	}
+	if rd.VerticalOscillationCm != nil {
+		writef(w, "  Vertical oscillation: %s cm\n", floatPtr(rd.VerticalOscillationCm))
+	}
+	if rd.VerticalRatioPct != nil {
+		writef(w, "  Vertical ratio: %s%%\n", floatPtr(rd.VerticalRatioPct))
+	}
+	if rd.StepLengthMm != nil {
+		writef(w, "  Step length: %s mm\n", floatPtr(rd.StepLengthMm))
+	}
+	if rd.GCTBalancePct != nil {
+		writef(w, "  GCT balance: %s%%\n", floatPtr(rd.GCTBalancePct))
+	}
+	if rd.GCTPct != nil {
+		writef(w, "  GCT percent: %s%%\n", floatPtr(rd.GCTPct))
+	}
+	if rd.ImpactLoadFactor != nil {
+		writef(w, "  Impact load factor: %s\n", floatPtr(rd.ImpactLoadFactor))
+	}
+	if rd.GAPPaceMps != nil {
+		writef(w, "  GAP pace: %s\n", pacePtr(rd.GAPPaceMps))
+	}
+	if rd.StepSpeedLossMps != nil {
+		writef(w, "  Step speed loss: %s m/s\n", floatPtr(rd.StepSpeedLossMps))
+	}
+	if rd.StepSpeedLossPct != nil {
+		writef(w, "  Step speed loss: %s%%\n", floatPtr(rd.StepSpeedLossPct))
 	}
 }
 
@@ -785,6 +856,17 @@ func distancePtr(value *float64) string {
 	return fmt.Sprintf("%.1fkm", *value/1000)
 }
 
+// pacePtr formats a speed in m/s as a pace string in min:sec per km.
+func pacePtr(value *float64) string {
+	if value == nil || *value <= 0 {
+		return "-"
+	}
+	secondsPerKm := 1000 / *value
+	minutes := int(secondsPerKm) / 60
+	seconds := int(secondsPerKm) % 60
+	return fmt.Sprintf("%d:%02d/km", minutes, seconds)
+}
+
 func fallback(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -804,7 +886,7 @@ func Usage(name string) string {
 	return fmt.Sprintf(`Usage:
   %[1]s [--env PATH] [--json] today
   %[1]s [--env PATH] [--json] activities [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--limit N]
-  %[1]s [--env PATH] [--json] activity <id> [--intervals]
+  %[1]s [--env PATH] [--json] activity <id> [--intervals] [--running-dynamics]
   %[1]s [--env PATH] [--json] recovery [--date YYYY-MM-DD]
   %[1]s [--env PATH] [--json] calendar [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--category WORKOUT]
   %[1]s [--env PATH] [--json] search [query]
@@ -837,7 +919,7 @@ func CommandUsage(name, command string) string {
 	case "activities":
 		return fmt.Sprintf("Usage: %s [--env PATH] [--json] activities [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--limit N]\n", name)
 	case "activity":
-		return fmt.Sprintf("Usage: %s [--env PATH] [--json] activity <id> [--intervals]\n", name)
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] activity <id> [--intervals] [--running-dynamics]\n", name)
 	case "recovery":
 		return fmt.Sprintf("Usage: %s [--env PATH] [--json] recovery [--date YYYY-MM-DD]\n", name)
 	case "calendar":

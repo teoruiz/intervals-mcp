@@ -15,6 +15,7 @@ type IntervalsClient interface {
 	GetAthlete(context.Context) (*intervals.Athlete, error)
 	ListActivities(context.Context, string, string, int) ([]intervals.Activity, error)
 	GetActivity(context.Context, string, bool) (*intervals.Activity, error)
+	GetActivityStreams(context.Context, string, []string) ([]intervals.ActivityStream, error)
 	GetWellness(context.Context, string) (*intervals.Wellness, error)
 	GetAthleteSummary(context.Context, string, string) ([]intervals.Summary, error)
 	ListEvents(context.Context, string, string, []string, int) ([]intervals.Event, error)
@@ -91,7 +92,7 @@ func (s *Service) RecentActivities(ctx context.Context, args RecentActivitiesArg
 	return ActivitiesContext{Activities: activities}, nil
 }
 
-func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*intervals.Activity, error) {
+func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*ActivityDetail, error) {
 	if strings.TrimSpace(args.ID) == "" {
 		return nil, errors.New("id is required")
 	}
@@ -99,7 +100,16 @@ func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*intervals.A
 	if err != nil {
 		return nil, fmt.Errorf("get activity: %w", err)
 	}
-	return activity, nil
+	detail := &ActivityDetail{Activity: activity}
+	if args.IncludeRunningDynamics {
+		streams, err := s.client.GetActivityStreams(ctx, args.ID, intervals.RunningDynamicsStreamTypes())
+		if err != nil {
+			return nil, fmt.Errorf("get activity streams: %w", err)
+		}
+		dynamics := intervals.AggregateRunningDynamics(streams)
+		detail.RunningDynamics = &dynamics
+	}
+	return detail, nil
 }
 
 func (s *Service) Recovery(ctx context.Context, args RecoveryArgs) (RecoveryContext, error) {

@@ -1,5 +1,6 @@
 # Example Fly.io configuration for intervals-mcp.
-# Change app, primary_region, MCP_PUBLIC_URL, and scaling settings for your own deployment.
+# Copy this file to fly.toml, then change app, primary_region, MCP_PUBLIC_URL,
+# and scaling settings for your own deployment.
 # Store credentials with `fly secrets set`; do not put Intervals.icu or Supabase secrets here.
 
 app = 'your-intervals-mcp-app'
@@ -23,5 +24,5 @@ primary_region = 'iad'
   processes = ['app']
 
 [[vm]]
-  memory = '1gb'
+  memory = '512mb'
   cpus = 1

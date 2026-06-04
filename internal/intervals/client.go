@@ -99,7 +99,28 @@ func (c *Client) ListActivities(ctx context.Context, oldest, newest string, limi
 	if err := c.get(ctx, c.athletePath("activities"), values, &activities); err != nil {
 		return nil, err
 	}
+	for i := range activities {
+		normalizeActivity(&activities[i])
+	}
 	return activities, nil
+}
+
+// normalizeActivity converts raw Intervals values into the units the rest of
+// the app uses. Intervals stores running cadence per leg; double it to steps
+// per minute, the standard running measure shown by watches and platforms.
+func normalizeActivity(a *Activity) {
+	if a == nil {
+		return
+	}
+	if a.AverageCadence != nil && IsRunType(a.Type) {
+		spm := *a.AverageCadence * 2
+		a.AverageCadence = &spm
+	}
+}
+
+// IsRunType reports whether an activity type is a run (Run, TrailRun, VirtualRun, etc.).
+func IsRunType(activityType string) bool {
+	return strings.Contains(strings.ToLower(activityType), "run")
 }
 
 func (c *Client) GetActivity(ctx context.Context, id string, includeIntervals bool) (*Activity, error) {
@@ -111,7 +132,23 @@ func (c *Client) GetActivity(ctx context.Context, id string, includeIntervals bo
 	if err := c.get(ctx, "/api/v1/activity/"+url.PathEscape(id), values, &activity); err != nil {
 		return nil, err
 	}
+	normalizeActivity(&activity)
 	return &activity, nil
+}
+
+// GetActivityStreams fetches the named data streams for an activity. Requested
+// types that the activity does not have are simply omitted from the response;
+// an empty result is normal and not an error.
+func (c *Client) GetActivityStreams(ctx context.Context, id string, types []string) ([]ActivityStream, error) {
+	values := url.Values{}
+	for _, t := range types {
+		values.Add("types", t)
+	}
+	var streams []ActivityStream
+	if err := c.get(ctx, "/api/v1/activity/"+url.PathEscape(id)+"/streams", values, &streams); err != nil {
+		return nil, err
+	}
+	return streams, nil
 }
 
 func (c *Client) GetWellness(ctx context.Context, date string) (*Wellness, error) {
@@ -241,6 +278,10 @@ var activityListFields = []string{
 	"icu_efficiency_factor",
 	"icu_power_hr",
 	"decoupling",
+	"average_cadence",
+	"average_stride",
+	"avg_lr_balance",
+	"gap",
 	"perceived_exertion",
 	"session_rpe",
 	"icu_rpe",

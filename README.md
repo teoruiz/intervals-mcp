@@ -213,15 +213,14 @@ Endpoints:
 
 ## Fly.io
 
-`fly.toml` is an example config. For day-to-day personal deployment, keep your
-real app config untracked:
+`fly.example.toml` is the tracked reusable config. Copy it to the ignored
+`fly.toml` for your deployment:
 
 ```sh
-cp fly.toml fly.prod.toml
-printf "\nfly.prod.toml\n" >> .git/info/exclude
+cp fly.example.toml fly.toml
 ```
 
-Edit `fly.prod.toml` with your real app name, region, and `MCP_PUBLIC_URL`.
+Edit `fly.toml` with your real app name, region, and `MCP_PUBLIC_URL`.
 Store credentials as secrets:
 
 ```sh
@@ -236,7 +235,7 @@ fly secrets set -a your-real-app-name \
 Deploy with:
 
 ```sh
-fly deploy -c fly.prod.toml
+fly deploy -c fly.toml
 ```
 
 For logs and status:

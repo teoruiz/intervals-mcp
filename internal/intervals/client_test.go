@@ -21,8 +21,12 @@ func TestListActivitiesRequest(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != wantAuth {
 			t.Fatalf("Authorization = %q", got)
 		}
-		if !strings.Contains(r.URL.Query().Get("fields"), "icu_training_load") {
-			t.Fatalf("fields missing training load: %q", r.URL.Query().Get("fields"))
+		fields := r.URL.Query().Get("fields")
+		if !strings.Contains(fields, "icu_training_load") {
+			t.Fatalf("fields missing training load: %q", fields)
+		}
+		if !strings.Contains(fields, "average_cadence") || !strings.Contains(fields, "gap") {
+			t.Fatalf("fields missing running metrics: %q", fields)
 		}
 		return jsonResponse(200, `[{"id":"a1","name":"Ride","type":"Ride"}]`), nil
 	})}
@@ -37,6 +41,43 @@ func TestListActivitiesRequest(t *testing.T) {
 	}
 	if len(activities) != 1 || activities[0].ID != "a1" {
 		t.Fatalf("activities = %#v", activities)
+	}
+}
+
+func TestGetActivityStreamsRequest(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/v1/activity/a1/streams" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		types := r.URL.Query()["types"]
+		if len(types) == 0 {
+			t.Fatalf("expected types query params, got none")
+		}
+		found := false
+		for _, ty := range types {
+			if ty == "GarminGCT" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("types missing GarminGCT: %v", types)
+		}
+		return jsonResponse(200, `[{"type":"GarminGCT","data":[200,null,210]},{"type":"GarminVO","allNull":true,"data":[null,null]}]`), nil
+	})}
+
+	client, err := NewClient(Config{BaseURL: "https://intervals.test", APIKey: "secret", AthleteID: "i123", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	streams, err := client.GetActivityStreams(context.Background(), "a1", RunningDynamicsStreamTypes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(streams) != 2 || streams[0].Type != "GarminGCT" {
+		t.Fatalf("streams = %#v", streams)
+	}
+	if len(streams[0].Data) != 3 || streams[0].Data[1] != nil {
+		t.Fatalf("data did not decode nulls: %#v", streams[0].Data)
 	}
 }
 

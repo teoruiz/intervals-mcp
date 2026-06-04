@@ -32,6 +32,10 @@ func (f *fakeIntervals) GetActivity(context.Context, string, bool) (*intervals.A
 	return &intervals.Activity{ID: "a1"}, nil
 }
 
+func (f *fakeIntervals) GetActivityStreams(context.Context, string, []string) ([]intervals.ActivityStream, error) {
+	return nil, nil
+}
+
 func (f *fakeIntervals) GetWellness(context.Context, string) (*intervals.Wellness, error) {
 	return nil, nil
 }

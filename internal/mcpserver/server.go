@@ -5,7 +5,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/teoruiz/intervals-mcp/internal/insights"
-	"github.com/teoruiz/intervals-mcp/internal/intervals"
 )
 
 func New(service *insights.Service) *mcp.Server {
@@ -32,8 +31,8 @@ func New(service *insights.Service) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_activity",
-		Description: "Get details for one Intervals.icu activity.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args insights.ActivityArgs) (*mcp.CallToolResult, *intervals.Activity, error) {
+		Description: "Get details for one Intervals.icu activity. Set include_running_dynamics to add Garmin running-dynamics averages (ground contact time, vertical oscillation, etc.).",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args insights.ActivityArgs) (*mcp.CallToolResult, *insights.ActivityDetail, error) {
 		return toolResult(service.Activity(ctx, args))
 	})
 

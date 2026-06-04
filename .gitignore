@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 
+fly.toml
+
 bin/
 dist/
 coverage.out
