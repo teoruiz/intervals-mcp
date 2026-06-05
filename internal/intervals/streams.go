@@ -12,6 +12,13 @@ type ActivityStream struct {
 	AllNull          bool       `json:"allNull,omitempty"`
 }
 
+const (
+	activityFieldGCT                 = "GCT"
+	activityFieldVerticalOscillation = "VerticalOscillation"
+	activityFieldVerticalRatio       = "VerticalRatio"
+	activityFieldVO2MaxGarmin        = "VO2MaxGarmin"
+)
+
 // Garmin running-dynamics custom stream type names used by Intervals.icu. These
 // only exist when the matching community custom fields are configured and the
 // activity has been re-analyzed.
@@ -64,6 +71,7 @@ type RunningDynamics struct {
 	GAPPaceMps            *float64 `json:"gap_pace_mps,omitempty"`
 	StepSpeedLossMps      *float64 `json:"step_speed_loss_mps,omitempty"`
 	StepSpeedLossPct      *float64 `json:"step_speed_loss_pct,omitempty"`
+	VO2MaxGarmin          *float64 `json:"vo2_max_garmin,omitempty"`
 	Note                  string   `json:"note,omitempty"`
 }
 
@@ -107,12 +115,73 @@ func AggregateRunningDynamics(streams []ActivityStream) RunningDynamics {
 		StepSpeedLossMps:      byType[streamGarminStepSpeedLoss],
 		StepSpeedLossPct:      byType[streamGarminStepSpeedLossPct],
 	}
+	rd.finalizeAvailability()
+	return rd
+}
+
+// RunningDynamicsFromActivity extracts Garmin running-dynamics summary values
+// exposed as activity-level custom fields.
+func RunningDynamicsFromActivity(activity *Activity) RunningDynamics {
+	var rd RunningDynamics
+	if activity != nil {
+		rd.GroundContactTimeMs = activity.GCT
+		rd.VerticalOscillationCm = activity.VerticalOscillation
+		rd.VerticalRatioPct = activity.VerticalRatio
+		rd.VO2MaxGarmin = activity.VO2MaxGarmin
+	}
+	rd.finalizeAvailability()
+	return rd
+}
+
+// MergeRunningDynamics prefers primary values and fills missing metrics from
+// fallback. This keeps Intervals activity-field summaries authoritative while
+// still supporting stream-derived custom metrics.
+func MergeRunningDynamics(primary, fallback RunningDynamics) RunningDynamics {
+	if primary.GroundContactTimeMs == nil {
+		primary.GroundContactTimeMs = fallback.GroundContactTimeMs
+	}
+	if primary.VerticalOscillationCm == nil {
+		primary.VerticalOscillationCm = fallback.VerticalOscillationCm
+	}
+	if primary.VerticalRatioPct == nil {
+		primary.VerticalRatioPct = fallback.VerticalRatioPct
+	}
+	if primary.StepLengthMm == nil {
+		primary.StepLengthMm = fallback.StepLengthMm
+	}
+	if primary.GCTBalancePct == nil {
+		primary.GCTBalancePct = fallback.GCTBalancePct
+	}
+	if primary.GCTPct == nil {
+		primary.GCTPct = fallback.GCTPct
+	}
+	if primary.ImpactLoadFactor == nil {
+		primary.ImpactLoadFactor = fallback.ImpactLoadFactor
+	}
+	if primary.GAPPaceMps == nil {
+		primary.GAPPaceMps = fallback.GAPPaceMps
+	}
+	if primary.StepSpeedLossMps == nil {
+		primary.StepSpeedLossMps = fallback.StepSpeedLossMps
+	}
+	if primary.StepSpeedLossPct == nil {
+		primary.StepSpeedLossPct = fallback.StepSpeedLossPct
+	}
+	if primary.VO2MaxGarmin == nil {
+		primary.VO2MaxGarmin = fallback.VO2MaxGarmin
+	}
+	primary.finalizeAvailability()
+	return primary
+}
+
+func (rd *RunningDynamics) finalizeAvailability() {
 	rd.Available = rd.GroundContactTimeMs != nil || rd.VerticalOscillationCm != nil ||
 		rd.VerticalRatioPct != nil || rd.StepLengthMm != nil || rd.GCTBalancePct != nil ||
 		rd.GCTPct != nil || rd.ImpactLoadFactor != nil || rd.GAPPaceMps != nil ||
-		rd.StepSpeedLossMps != nil || rd.StepSpeedLossPct != nil
-	if !rd.Available {
-		rd.Note = "No Garmin running-dynamics streams found. Add the community custom activity fields (GarminGCT, GarminVO, etc.) in Intervals.icu and re-analyze the activity."
+		rd.StepSpeedLossMps != nil || rd.StepSpeedLossPct != nil || rd.VO2MaxGarmin != nil
+	if rd.Available {
+		rd.Note = ""
+		return
 	}
-	return rd
+	rd.Note = "No Garmin running-dynamics activity fields or streams found. Add the community custom activity fields in Intervals.icu and re-analyze the activity."
 }

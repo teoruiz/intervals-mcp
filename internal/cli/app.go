@@ -701,6 +701,9 @@ func writeRunningDynamics(w io.Writer, rd *intervals.RunningDynamics) {
 	if rd.StepSpeedLossPct != nil {
 		writef(w, "  Step speed loss: %s%%\n", floatPtr(rd.StepSpeedLossPct))
 	}
+	if rd.VO2MaxGarmin != nil {
+		writef(w, "  Garmin VO2 max: %s\n", floatPtr(rd.VO2MaxGarmin))
+	}
 }
 
 func writeRecovery(w io.Writer, ctx insights.RecoveryContext, style bool) {

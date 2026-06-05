@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-//go:fix inline
-func f64(v float64) *float64 { return new(v) }
-
 func TestMeanNonNull(t *testing.T) {
 	if got := meanNonNull([]*float64{nil, nil}); got != nil {
 		t.Fatalf("all-null mean = %v, want nil", got)
@@ -15,7 +12,7 @@ func TestMeanNonNull(t *testing.T) {
 	if got := meanNonNull(nil); got != nil {
 		t.Fatalf("empty mean = %v, want nil", got)
 	}
-	got := meanNonNull([]*float64{f64(200), nil, f64(220)})
+	got := meanNonNull([]*float64{new(float64(200)), nil, new(float64(220))})
 	if got == nil || *got != 210 {
 		t.Fatalf("mean = %v, want 210", got)
 	}
@@ -23,8 +20,8 @@ func TestMeanNonNull(t *testing.T) {
 
 func TestAggregateRunningDynamics(t *testing.T) {
 	streams := []ActivityStream{
-		{Type: "GarminGCT", Data: []*float64{f64(200), nil, f64(220)}},
-		{Type: "GarminVO", Data: []*float64{f64(8), f64(10)}},
+		{Type: "GarminGCT", Data: []*float64{new(float64(200)), nil, new(float64(220))}},
+		{Type: "GarminVO", Data: []*float64{new(float64(8)), new(float64(10))}},
 		{Type: "GarminGCTBalance", AllNull: true, Data: []*float64{nil, nil}},
 	}
 	rd := AggregateRunningDynamics(streams)
@@ -55,20 +52,65 @@ func TestAggregateRunningDynamicsAbsent(t *testing.T) {
 	}
 }
 
+func TestRunningDynamicsFromActivityFields(t *testing.T) {
+	activity := &Activity{
+		GCT:                 new(278.5),
+		VerticalOscillation: new(7.7),
+		VerticalRatio:       new(7.91),
+		VO2MaxGarmin:        new(43.9),
+	}
+
+	rd := RunningDynamicsFromActivity(activity)
+	if !rd.Available {
+		t.Fatal("Available = false, want true")
+	}
+	if rd.GroundContactTimeMs == nil || *rd.GroundContactTimeMs != 278.5 {
+		t.Fatalf("GroundContactTimeMs = %v, want 278.5", rd.GroundContactTimeMs)
+	}
+	if rd.VerticalOscillationCm == nil || *rd.VerticalOscillationCm != 7.7 {
+		t.Fatalf("VerticalOscillationCm = %v, want 7.7", rd.VerticalOscillationCm)
+	}
+	if rd.VerticalRatioPct == nil || *rd.VerticalRatioPct != 7.91 {
+		t.Fatalf("VerticalRatioPct = %v, want 7.91", rd.VerticalRatioPct)
+	}
+	if rd.VO2MaxGarmin == nil || *rd.VO2MaxGarmin != 43.9 {
+		t.Fatalf("VO2MaxGarmin = %v, want 43.9", rd.VO2MaxGarmin)
+	}
+}
+
+func TestMergeRunningDynamicsPrefersActivityFields(t *testing.T) {
+	primary := RunningDynamicsFromActivity(&Activity{GCT: new(278.5)})
+	fallback := AggregateRunningDynamics([]ActivityStream{
+		{Type: "GarminGCT", Data: []*float64{new(float64(200))}},
+		{Type: "GarminVO", Data: []*float64{new(float64(8))}},
+	})
+
+	rd := MergeRunningDynamics(primary, fallback)
+	if rd.GroundContactTimeMs == nil || *rd.GroundContactTimeMs != 278.5 {
+		t.Fatalf("GroundContactTimeMs = %v, want activity field value 278.5", rd.GroundContactTimeMs)
+	}
+	if rd.VerticalOscillationCm == nil || *rd.VerticalOscillationCm != 8 {
+		t.Fatalf("VerticalOscillationCm = %v, want stream fallback 8", rd.VerticalOscillationCm)
+	}
+	if rd.Note != "" {
+		t.Fatalf("Note = %q, want empty", rd.Note)
+	}
+}
+
 func TestNormalizeActivityDoublesRunCadence(t *testing.T) {
-	run := &Activity{Type: "Run", AverageCadence: f64(75)}
+	run := &Activity{Type: "Run", AverageCadence: new(float64(75))}
 	normalizeActivity(run)
 	if run.AverageCadence == nil || *run.AverageCadence != 150 {
 		t.Fatalf("run cadence = %v, want 150 spm", run.AverageCadence)
 	}
 
-	trail := &Activity{Type: "TrailRun", AverageCadence: f64(80)}
+	trail := &Activity{Type: "TrailRun", AverageCadence: new(float64(80))}
 	normalizeActivity(trail)
 	if trail.AverageCadence == nil || *trail.AverageCadence != 160 {
 		t.Fatalf("trail cadence = %v, want 160 spm", trail.AverageCadence)
 	}
 
-	ride := &Activity{Type: "Ride", AverageCadence: f64(90)}
+	ride := &Activity{Type: "Ride", AverageCadence: new(float64(90))}
 	normalizeActivity(ride)
 	if ride.AverageCadence == nil || *ride.AverageCadence != 90 {
 		t.Fatalf("ride cadence = %v, want 90 (unchanged)", ride.AverageCadence)
@@ -80,7 +122,7 @@ func TestNormalizeActivityDoublesRunCadence(t *testing.T) {
 
 func TestActivityUnmarshalsRunningSummaryFields(t *testing.T) {
 	var a Activity
-	body := `{"id":"a1","average_cadence":172.5,"average_stride":1.18,"avg_lr_balance":49.6,"gap":3.5}`
+	body := `{"id":"a1","average_cadence":172.5,"average_stride":1.18,"avg_lr_balance":49.6,"gap":3.5,"GCT":278.5,"VerticalOscillation":7.7,"VerticalRatio":7.91,"VO2MaxGarmin":43.9}`
 	if err := json.Unmarshal([]byte(body), &a); err != nil {
 		t.Fatal(err)
 	}
@@ -95,5 +137,17 @@ func TestActivityUnmarshalsRunningSummaryFields(t *testing.T) {
 	}
 	if a.GAP == nil || *a.GAP != 3.5 {
 		t.Fatalf("GAP = %v", a.GAP)
+	}
+	if a.GCT == nil || *a.GCT != 278.5 {
+		t.Fatalf("GCT = %v", a.GCT)
+	}
+	if a.VerticalOscillation == nil || *a.VerticalOscillation != 7.7 {
+		t.Fatalf("VerticalOscillation = %v", a.VerticalOscillation)
+	}
+	if a.VerticalRatio == nil || *a.VerticalRatio != 7.91 {
+		t.Fatalf("VerticalRatio = %v", a.VerticalRatio)
+	}
+	if a.VO2MaxGarmin == nil || *a.VO2MaxGarmin != 43.9 {
+		t.Fatalf("VO2MaxGarmin = %v", a.VO2MaxGarmin)
 	}
 }

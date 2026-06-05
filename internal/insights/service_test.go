@@ -48,15 +48,12 @@ func TestTodayContextCombinesData(t *testing.T) {
 	}
 }
 
-//go:fix inline
-func ptrFloat(v float64) *float64 { return new(v) }
-
 func TestActivityWithRunningDynamics(t *testing.T) {
 	client := &fakeIntervals{
 		activity: &intervals.Activity{ID: "a1", Type: "Run"},
 		streams: []intervals.ActivityStream{
-			{Type: "GarminGCT", Data: []*float64{ptrFloat(200), nil, ptrFloat(220)}},
-			{Type: "GarminVO", Data: []*float64{ptrFloat(8), ptrFloat(10)}},
+			{Type: "GarminGCT", Data: []*float64{new(float64(200)), nil, new(float64(220))}},
+			{Type: "GarminVO", Data: []*float64{new(float64(8)), new(float64(10))}},
 		},
 	}
 	service := New(client)
@@ -73,6 +70,48 @@ func TestActivityWithRunningDynamics(t *testing.T) {
 	}
 	if !client.streamsCalled {
 		t.Fatal("expected GetActivityStreams to be called")
+	}
+}
+
+func TestActivityWithRunningDynamicsFromActivityFields(t *testing.T) {
+	gct := 278.5
+	vo := 7.7
+	vr := 7.91
+	vo2 := 43.9
+	client := &fakeIntervals{
+		activity: &intervals.Activity{
+			ID:                  "a1",
+			Type:                "Run",
+			GCT:                 &gct,
+			VerticalOscillation: &vo,
+			VerticalRatio:       &vr,
+			VO2MaxGarmin:        &vo2,
+		},
+		streams: nil,
+	}
+	service := New(client)
+
+	detail, err := service.Activity(context.Background(), ActivityArgs{ID: "a1", IncludeRunningDynamics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.RunningDynamics == nil || !detail.RunningDynamics.Available {
+		t.Fatalf("RunningDynamics = %#v", detail.RunningDynamics)
+	}
+	if got := detail.RunningDynamics.GroundContactTimeMs; got == nil || *got != 278.5 {
+		t.Fatalf("GroundContactTimeMs = %v, want 278.5", got)
+	}
+	if got := detail.RunningDynamics.VerticalOscillationCm; got == nil || *got != 7.7 {
+		t.Fatalf("VerticalOscillationCm = %v, want 7.7", got)
+	}
+	if got := detail.RunningDynamics.VerticalRatioPct; got == nil || *got != 7.91 {
+		t.Fatalf("VerticalRatioPct = %v, want 7.91", got)
+	}
+	if got := detail.RunningDynamics.VO2MaxGarmin; got == nil || *got != 43.9 {
+		t.Fatalf("VO2MaxGarmin = %v, want 43.9", got)
+	}
+	if !client.streamsCalled {
+		t.Fatal("expected GetActivityStreams to be called for stream fallback")
 	}
 }
 

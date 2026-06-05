@@ -8,40 +8,44 @@ type Athlete struct {
 }
 
 type Activity struct {
-	ID                string   `json:"id,omitempty"`
-	Name              string   `json:"name,omitempty"`
-	Type              string   `json:"type,omitempty"`
-	StartDateLocal    string   `json:"start_date_local,omitempty"`
-	StartDate         string   `json:"start_date,omitempty"`
-	Timezone          string   `json:"timezone,omitempty"`
-	MovingTime        *int     `json:"moving_time,omitempty"`
-	ElapsedTime       *int     `json:"elapsed_time,omitempty"`
-	Distance          *float64 `json:"distance,omitempty"`
-	ICUDistance       *float64 `json:"icu_distance,omitempty"`
-	Calories          *int     `json:"calories,omitempty"`
-	CarbsUsed         *int     `json:"carbs_used,omitempty"`
-	CarbsIngested     *int     `json:"carbs_ingested,omitempty"`
-	TrainingLoad      *int     `json:"icu_training_load,omitempty"`
-	ATL               *float64 `json:"icu_atl,omitempty"`
-	CTL               *float64 `json:"icu_ctl,omitempty"`
-	AverageHeartrate  *int     `json:"average_heartrate,omitempty"`
-	MaxHeartrate      *int     `json:"max_heartrate,omitempty"`
-	Intensity         *float64 `json:"icu_intensity,omitempty"`
-	EfficiencyFactor  *float64 `json:"icu_efficiency_factor,omitempty"`
-	PowerHR           *float64 `json:"icu_power_hr,omitempty"`
-	Decoupling        *float64 `json:"decoupling,omitempty"`
-	AverageCadence    *float64 `json:"average_cadence,omitempty"` // run cadence is normalized to steps per minute; non-run cadence is raw
-	AverageStride     *float64 `json:"average_stride,omitempty"`  // meters
-	AvgLRBalance      *float64 `json:"avg_lr_balance,omitempty"`  // left/right balance percent
-	GAP               *float64 `json:"gap,omitempty"`             // grade-adjusted pace, m/s
-	PerceivedExertion *float64 `json:"perceived_exertion,omitempty"`
-	SessionRPE        *int     `json:"session_rpe,omitempty"`
-	ICURPE            *int     `json:"icu_rpe,omitempty"`
-	Feel              *int     `json:"feel,omitempty"`
-	Description       string   `json:"description,omitempty"`
-	IntervalSummary   []string `json:"interval_summary,omitempty"`
-	Intervals         []any    `json:"icu_intervals,omitempty"`
-	Tags              []string `json:"tags,omitempty"`
+	ID                  string   `json:"id,omitempty"`
+	Name                string   `json:"name,omitempty"`
+	Type                string   `json:"type,omitempty"`
+	StartDateLocal      string   `json:"start_date_local,omitempty"`
+	StartDate           string   `json:"start_date,omitempty"`
+	Timezone            string   `json:"timezone,omitempty"`
+	MovingTime          *int     `json:"moving_time,omitempty"`
+	ElapsedTime         *int     `json:"elapsed_time,omitempty"`
+	Distance            *float64 `json:"distance,omitempty"`
+	ICUDistance         *float64 `json:"icu_distance,omitempty"`
+	Calories            *int     `json:"calories,omitempty"`
+	CarbsUsed           *int     `json:"carbs_used,omitempty"`
+	CarbsIngested       *int     `json:"carbs_ingested,omitempty"`
+	TrainingLoad        *int     `json:"icu_training_load,omitempty"`
+	ATL                 *float64 `json:"icu_atl,omitempty"`
+	CTL                 *float64 `json:"icu_ctl,omitempty"`
+	AverageHeartrate    *int     `json:"average_heartrate,omitempty"`
+	MaxHeartrate        *int     `json:"max_heartrate,omitempty"`
+	Intensity           *float64 `json:"icu_intensity,omitempty"`
+	EfficiencyFactor    *float64 `json:"icu_efficiency_factor,omitempty"`
+	PowerHR             *float64 `json:"icu_power_hr,omitempty"`
+	Decoupling          *float64 `json:"decoupling,omitempty"`
+	AverageCadence      *float64 `json:"average_cadence,omitempty"`     // run cadence is normalized to steps per minute; non-run cadence is raw
+	AverageStride       *float64 `json:"average_stride,omitempty"`      // meters
+	AvgLRBalance        *float64 `json:"avg_lr_balance,omitempty"`      // left/right balance percent
+	GAP                 *float64 `json:"gap,omitempty"`                 // grade-adjusted pace, m/s
+	GCT                 *float64 `json:"GCT,omitempty"`                 // Garmin ground contact time, ms
+	VerticalOscillation *float64 `json:"VerticalOscillation,omitempty"` // Garmin vertical oscillation, cm
+	VerticalRatio       *float64 `json:"VerticalRatio,omitempty"`       // Garmin vertical ratio, percent
+	VO2MaxGarmin        *float64 `json:"VO2MaxGarmin,omitempty"`        // Garmin VO2 max estimate
+	PerceivedExertion   *float64 `json:"perceived_exertion,omitempty"`
+	SessionRPE          *int     `json:"session_rpe,omitempty"`
+	ICURPE              *int     `json:"icu_rpe,omitempty"`
+	Feel                *int     `json:"feel,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	IntervalSummary     []string `json:"interval_summary,omitempty"`
+	Intervals           []any    `json:"icu_intervals,omitempty"`
+	Tags                []string `json:"tags,omitempty"`
 }
 
 type Wellness struct {

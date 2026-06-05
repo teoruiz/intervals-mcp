@@ -102,11 +102,12 @@ func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*ActivityDet
 	}
 	detail := &ActivityDetail{Activity: activity}
 	if args.IncludeRunningDynamics {
+		dynamics := intervals.RunningDynamicsFromActivity(activity)
 		streams, err := s.client.GetActivityStreams(ctx, args.ID, intervals.RunningDynamicsStreamTypes())
 		if err != nil {
 			return nil, fmt.Errorf("get activity streams: %w", err)
 		}
-		dynamics := intervals.AggregateRunningDynamics(streams)
+		dynamics = intervals.MergeRunningDynamics(dynamics, intervals.AggregateRunningDynamics(streams))
 		detail.RunningDynamics = &dynamics
 	}
 	return detail, nil

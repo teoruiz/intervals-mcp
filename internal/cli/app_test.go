@@ -98,6 +98,7 @@ func TestActivityRendersRunningDynamics(t *testing.T) {
 	cadence := 172.0 // already normalized to steps per minute upstream
 	gct := 215.0
 	vo := 8.4
+	vo2 := 43.9
 	service := &fakeService{
 		activity: &insights.ActivityDetail{
 			Activity: &intervals.Activity{ID: "abc", Name: "Tempo", Type: "Run", AverageCadence: &cadence},
@@ -105,6 +106,7 @@ func TestActivityRendersRunningDynamics(t *testing.T) {
 				Available:             true,
 				GroundContactTimeMs:   &gct,
 				VerticalOscillationCm: &vo,
+				VO2MaxGarmin:          &vo2,
 			},
 		},
 	}
@@ -118,7 +120,7 @@ func TestActivityRendersRunningDynamics(t *testing.T) {
 		t.Fatalf("activityArgs = %#v", service.activityArgs)
 	}
 	got := out.String()
-	for _, want := range []string{"Cadence: 172.0 spm", "Running dynamics:", "Ground contact time: 215.0 ms", "Vertical oscillation: 8.4 cm"} {
+	for _, want := range []string{"Cadence: 172.0 spm", "Running dynamics:", "Ground contact time: 215.0 ms", "Vertical oscillation: 8.4 cm", "Garmin VO2 max: 43.9"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output missing %q:\n%s", want, got)
 		}

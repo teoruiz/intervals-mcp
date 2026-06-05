@@ -28,6 +28,9 @@ func TestListActivitiesRequest(t *testing.T) {
 		if !strings.Contains(fields, "average_cadence") || !strings.Contains(fields, "gap") {
 			t.Fatalf("fields missing running metrics: %q", fields)
 		}
+		if !strings.Contains(fields, "GCT") || !strings.Contains(fields, "VerticalOscillation") {
+			t.Fatalf("fields missing running dynamics activity fields: %q", fields)
+		}
 		return jsonResponse(200, `[{"id":"a1","name":"Ride","type":"Ride"}]`), nil
 	})}
 
