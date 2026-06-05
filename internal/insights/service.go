@@ -109,6 +109,9 @@ func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*ActivityDet
 		}
 		dynamics = intervals.MergeRunningDynamics(dynamics, intervals.AggregateRunningDynamics(streams))
 		detail.RunningDynamics = &dynamics
+		if args.IncludeIntervals {
+			detail.IntervalRunningDynamics = intervals.AggregateIntervalRunningDynamics(activity.Intervals, streams)
+		}
 	}
 	return detail, nil
 }

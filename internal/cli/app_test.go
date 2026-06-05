@@ -127,6 +127,40 @@ func TestActivityRendersRunningDynamics(t *testing.T) {
 	}
 }
 
+func TestActivityJSONIncludesIntervalRunningDynamics(t *testing.T) {
+	gct := 210.0
+	intervalID := 42
+	service := &fakeService{
+		activity: &insights.ActivityDetail{
+			Activity: &intervals.Activity{ID: "abc", Name: "Tempo", Type: "Run"},
+			IntervalRunningDynamics: []intervals.IntervalRunningDynamics{{
+				IntervalIndex: 0,
+				IntervalID:    &intervalID,
+				Type:          "WORK",
+				RunningDynamics: intervals.RunningDynamics{
+					Available:           true,
+					GroundContactTimeMs: &gct,
+				},
+			}},
+		},
+	}
+	var out bytes.Buffer
+	app := New(service, Options{JSON: true, NoStyle: true, Out: &out})
+
+	if err := app.Run(context.Background(), []string{"activity", "abc", "--intervals", "--running-dynamics"}); err != nil {
+		t.Fatal(err)
+	}
+	if !service.activityArgs.IncludeIntervals || !service.activityArgs.IncludeRunningDynamics {
+		t.Fatalf("activityArgs = %#v", service.activityArgs)
+	}
+	got := out.String()
+	for _, want := range []string{`"interval_running_dynamics"`, `"interval_index": 0`, `"interval_id": 42`, `"ground_contact_time_ms": 210`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestActivityRendersNonRunCadenceAsRPM(t *testing.T) {
 	cadence := 90.0
 	service := &fakeService{

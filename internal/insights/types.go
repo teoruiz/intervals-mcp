@@ -15,14 +15,15 @@ type RecentActivitiesArgs struct {
 type ActivityArgs struct {
 	ID                     string `json:"id" jsonschema:"Intervals.icu activity id."`
 	IncludeIntervals       bool   `json:"include_intervals,omitempty" jsonschema:"Whether to include interval data for the activity."`
-	IncludeRunningDynamics bool   `json:"include_running_dynamics,omitempty" jsonschema:"Whether to include Garmin running-dynamics averages from activity fields and stream fallback (ground contact time, vertical oscillation, etc.). Requires the matching community custom fields configured in Intervals.icu."`
+	IncludeRunningDynamics bool   `json:"include_running_dynamics,omitempty" jsonschema:"Whether to include Garmin running-dynamics averages from activity fields and stream fallback (ground contact time, vertical oscillation, etc.). When include_intervals is also true, interval-aligned running dynamics are included when source interval fields or streams exist. Requires the matching community custom fields configured in Intervals.icu."`
 }
 
 // ActivityDetail is a single activity enriched with optional running dynamics.
 // The embedded Activity keeps the JSON flat so existing consumers are unaffected.
 type ActivityDetail struct {
 	*intervals.Activity
-	RunningDynamics *intervals.RunningDynamics `json:"running_dynamics,omitempty"`
+	RunningDynamics         *intervals.RunningDynamics          `json:"running_dynamics,omitempty"`
+	IntervalRunningDynamics []intervals.IntervalRunningDynamics `json:"interval_running_dynamics,omitempty"`
 }
 
 type RecoveryArgs struct {

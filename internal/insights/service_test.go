@@ -115,6 +115,74 @@ func TestActivityWithRunningDynamicsFromActivityFields(t *testing.T) {
 	}
 }
 
+func TestActivityWithIntervalRunningDynamics(t *testing.T) {
+	client := &fakeIntervals{
+		activity: &intervals.Activity{
+			ID:   "a1",
+			Type: "Run",
+			Intervals: []any{
+				map[string]any{"id": float64(42), "type": "WORK", "start_index": float64(0), "end_index": float64(2)},
+			},
+		},
+		streams: []intervals.ActivityStream{
+			{Type: "GarminGCT", Data: []*float64{new(float64(200)), new(float64(220))}},
+		},
+	}
+	service := New(client)
+
+	detail, err := service.Activity(context.Background(), ActivityArgs{ID: "a1", IncludeIntervals: true, IncludeRunningDynamics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !client.includeIntervals {
+		t.Fatal("expected GetActivity to include intervals")
+	}
+	if len(detail.IntervalRunningDynamics) != 1 {
+		t.Fatalf("IntervalRunningDynamics len = %d, want 1", len(detail.IntervalRunningDynamics))
+	}
+	record := detail.IntervalRunningDynamics[0]
+	if record.IntervalID == nil || *record.IntervalID != 42 {
+		t.Fatalf("IntervalID = %v, want 42", record.IntervalID)
+	}
+	if got := record.RunningDynamics.GroundContactTimeMs; got == nil || *got != 210 {
+		t.Fatalf("GroundContactTimeMs = %v, want 210", got)
+	}
+}
+
+func TestActivityIntervalRunningDynamicsRequiresBothFlags(t *testing.T) {
+	client := &fakeIntervals{
+		activity: &intervals.Activity{
+			ID:        "a1",
+			Type:      "Run",
+			Intervals: []any{map[string]any{"start_index": float64(0), "end_index": float64(2)}},
+		},
+		streams: []intervals.ActivityStream{
+			{Type: "GarminGCT", Data: []*float64{new(float64(200)), new(float64(220))}},
+		},
+	}
+	service := New(client)
+
+	withDynamics, err := service.Activity(context.Background(), ActivityArgs{ID: "a1", IncludeRunningDynamics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withDynamics.IntervalRunningDynamics) != 0 {
+		t.Fatalf("IntervalRunningDynamics = %#v, want empty without include_intervals", withDynamics.IntervalRunningDynamics)
+	}
+
+	client.streamsCalled = false
+	withIntervals, err := service.Activity(context.Background(), ActivityArgs{ID: "a1", IncludeIntervals: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withIntervals.IntervalRunningDynamics) != 0 {
+		t.Fatalf("IntervalRunningDynamics = %#v, want empty without include_running_dynamics", withIntervals.IntervalRunningDynamics)
+	}
+	if client.streamsCalled {
+		t.Fatal("did not expect streams to be fetched without include_running_dynamics")
+	}
+}
+
 func TestActivityWithoutRunningDynamics(t *testing.T) {
 	client := &fakeIntervals{activity: &intervals.Activity{ID: "a1", Type: "Run"}}
 	service := New(client)
@@ -151,14 +219,15 @@ func TestActivityRunningDynamicsAbsent(t *testing.T) {
 }
 
 type fakeIntervals struct {
-	athlete       *intervals.Athlete
-	activities    []intervals.Activity
-	activity      *intervals.Activity
-	streams       []intervals.ActivityStream
-	streamsCalled bool
-	wellness      *intervals.Wellness
-	summaries     []intervals.Summary
-	events        []intervals.Event
+	athlete          *intervals.Athlete
+	activities       []intervals.Activity
+	activity         *intervals.Activity
+	streams          []intervals.ActivityStream
+	streamsCalled    bool
+	includeIntervals bool
+	wellness         *intervals.Wellness
+	summaries        []intervals.Summary
+	events           []intervals.Event
 }
 
 func (f *fakeIntervals) GetAthlete(context.Context) (*intervals.Athlete, error) {
@@ -169,7 +238,8 @@ func (f *fakeIntervals) ListActivities(context.Context, string, string, int) ([]
 	return f.activities, nil
 }
 
-func (f *fakeIntervals) GetActivity(context.Context, string, bool) (*intervals.Activity, error) {
+func (f *fakeIntervals) GetActivity(_ context.Context, _ string, includeIntervals bool) (*intervals.Activity, error) {
+	f.includeIntervals = includeIntervals
 	if f.activity != nil {
 		return f.activity, nil
 	}

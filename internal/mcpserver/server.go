@@ -31,7 +31,7 @@ func New(service *insights.Service) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_activity",
-		Description: "Get details for one Intervals.icu activity. Set include_running_dynamics to add Garmin running-dynamics averages (ground contact time, vertical oscillation, etc.).",
+		Description: "Get details for one Intervals.icu activity. Set include_running_dynamics to add Garmin running-dynamics averages (ground contact time, vertical oscillation, etc.); combine it with include_intervals to add interval-aligned running dynamics when source interval fields or streams exist.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args insights.ActivityArgs) (*mcp.CallToolResult, *insights.ActivityDetail, error) {
 		return toolResult(service.Activity(ctx, args))
 	})
