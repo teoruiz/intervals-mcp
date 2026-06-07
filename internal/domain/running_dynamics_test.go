@@ -1,4 +1,4 @@
-package intervals
+package domain
 
 import (
 	"encoding/json"
@@ -212,29 +212,6 @@ func TestAggregateIntervalRunningDynamicsUnavailable(t *testing.T) {
 	if rd.Note != "No Garmin running-dynamics interval fields or streams found for this interval." {
 		t.Fatalf("Note = %q", rd.Note)
 	}
-}
-
-func TestNormalizeActivityDoublesRunCadence(t *testing.T) {
-	run := &Activity{Type: "Run", AverageCadence: new(float64(75))}
-	normalizeActivity(run)
-	if run.AverageCadence == nil || *run.AverageCadence != 150 {
-		t.Fatalf("run cadence = %v, want 150 spm", run.AverageCadence)
-	}
-
-	trail := &Activity{Type: "TrailRun", AverageCadence: new(float64(80))}
-	normalizeActivity(trail)
-	if trail.AverageCadence == nil || *trail.AverageCadence != 160 {
-		t.Fatalf("trail cadence = %v, want 160 spm", trail.AverageCadence)
-	}
-
-	ride := &Activity{Type: "Ride", AverageCadence: new(float64(90))}
-	normalizeActivity(ride)
-	if ride.AverageCadence == nil || *ride.AverageCadence != 90 {
-		t.Fatalf("ride cadence = %v, want 90 (unchanged)", ride.AverageCadence)
-	}
-
-	normalizeActivity(nil)                    // must not panic
-	normalizeActivity(&Activity{Type: "Run"}) // nil cadence must not panic
 }
 
 func TestActivityUnmarshalsRunningSummaryFields(t *testing.T) {

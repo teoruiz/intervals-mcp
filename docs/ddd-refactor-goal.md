@@ -27,7 +27,6 @@ Rules:
 ```text
 cmd/
   intervals/
-  intervals-cli/
   intervals-mcp/
 
 internal/

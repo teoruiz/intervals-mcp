@@ -15,8 +15,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/teoruiz/intervals-mcp/internal/insights"
-	"github.com/teoruiz/intervals-mcp/internal/intervals"
+	"github.com/teoruiz/intervals-mcp/internal/application/insights"
+	"github.com/teoruiz/intervals-mcp/internal/domain"
 )
 
 type Service interface {
@@ -588,7 +588,7 @@ func writeToday(w io.Writer, ctx insights.TodayContext, style bool) {
 	writeNotes(w, ctx.Notes)
 }
 
-func writeActivities(w io.Writer, activities []intervals.Activity, style bool) {
+func writeActivities(w io.Writer, activities []domain.Activity, style bool) {
 	writeLine(w, title("Activities", style))
 	if len(activities) == 0 {
 		writeLine(w, "No activities found.")
@@ -641,10 +641,10 @@ func writeActivity(w io.Writer, detail *insights.ActivityDetail, style bool) {
 
 // writeActivityMetrics prints cadence plus run-specific summary metrics when
 // present. Run cadence is normalized upstream; non-run cadence remains raw.
-func writeActivityMetrics(w io.Writer, activity *intervals.Activity) {
+func writeActivityMetrics(w io.Writer, activity *domain.Activity) {
 	if activity.AverageCadence != nil {
 		unit := "rpm"
-		if intervals.IsRunType(activity.Type) {
+		if domain.IsRunType(activity.Type) {
 			unit = "spm"
 		}
 		writef(w, "Cadence: %s %s\n", floatPtr(activity.AverageCadence), unit)
@@ -662,7 +662,7 @@ func writeActivityMetrics(w io.Writer, activity *intervals.Activity) {
 
 // writeRunningDynamics prints Garmin running-dynamics averages, or the absence
 // note when the streams were requested but not found.
-func writeRunningDynamics(w io.Writer, rd *intervals.RunningDynamics) {
+func writeRunningDynamics(w io.Writer, rd *domain.RunningDynamics) {
 	if rd == nil {
 		return
 	}
@@ -756,7 +756,7 @@ func writeSearch(w io.Writer, result insights.SearchResult, style bool) {
 	_ = tw.Flush()
 }
 
-func writeEventTable(w io.Writer, events []intervals.Event) {
+func writeEventTable(w io.Writer, events []domain.CalendarEvent) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	writeLine(tw, "DATE\tID\tCATEGORY\tTYPE\tNAME\tLOAD\tTIME")
 	for _, event := range events {
@@ -790,7 +790,7 @@ func title(value string, style bool) string {
 	return lipgloss.NewStyle().Bold(true).Render(value)
 }
 
-func activityLine(activity intervals.Activity) string {
+func activityLine(activity domain.Activity) string {
 	parts := []string{
 		fallback(activity.Name, activity.ID),
 		fallback(activity.Type, "unknown type"),

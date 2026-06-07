@@ -8,8 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/teoruiz/intervals-mcp/internal/config"
-	appruntime "github.com/teoruiz/intervals-mcp/internal/runtime"
+	"github.com/teoruiz/intervals-mcp/internal/platform/config"
 )
 
 type sourceView struct {
@@ -144,7 +143,11 @@ func doctorChecks(ctx context.Context, cfg config.Config, source config.Source, 
 		checks = append(checks, doctorCheck{Name: "intervals_config", Status: "invalid", Detail: err.Error()})
 		return checks
 	}
-	client, err := appruntime.NewIntervalsClient(cfg, r.httpClientFor(cfg))
+	if r.newIntervalsClient == nil {
+		checks = append(checks, doctorCheck{Name: "intervals_client", Status: "invalid", Detail: "intervals client factory is required"})
+		return checks
+	}
+	client, err := r.newIntervalsClient(cfg, r.httpClientFor(cfg))
 	if err != nil {
 		checks = append(checks, doctorCheck{Name: "intervals_client", Status: "invalid", Detail: err.Error()})
 		return checks

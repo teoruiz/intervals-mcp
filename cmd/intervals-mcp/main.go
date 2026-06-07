@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,12 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
-	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"github.com/teoruiz/intervals-mcp/internal/auth"
-	"github.com/teoruiz/intervals-mcp/internal/config"
-	"github.com/teoruiz/intervals-mcp/internal/oauthui"
-	appruntime "github.com/teoruiz/intervals-mcp/internal/runtime"
+	appruntime "github.com/teoruiz/intervals-mcp/internal/platform/runtime"
 )
 
 const defaultLocalAddr = "127.0.0.1:8080"
@@ -86,7 +80,7 @@ func run(logger *slog.Logger, args []string) error {
 }
 
 func serveAuthenticated(logger *slog.Logger, opts options) error {
-	cfg, _, err := config.LoadDiscovered(config.DiscoveryOptions{
+	cfg, _, err := appruntime.LoadDiscovered(appruntime.DiscoveryOptions{
 		EnvPath:     opts.EnvPath,
 		EnvExplicit: opts.EnvExplicit,
 	})
@@ -95,51 +89,14 @@ func serveAuthenticated(logger *slog.Logger, opts options) error {
 	}
 
 	httpClient := &http.Client{Timeout: cfg.RequestTimeout}
-	mcpHandler, err := buildMCPHandler(cfg, httpClient)
+	handler, err := appruntime.NewAuthenticatedHTTPHandler(cfg, httpClient)
 	if err != nil {
 		return err
 	}
-
-	verifier, err := auth.NewJWTVerifier(auth.VerifierConfig{
-		IssuerURL:      cfg.OIDCIssuerURL,
-		Audience:       cfg.OIDCAudience,
-		AllowedEmail:   cfg.OIDCAllowedEmail,
-		AllowedSubject: cfg.OIDCAllowedSub,
-		JWKSURL:        cfg.OIDCJWKSURL,
-		HTTPClient:     httpClient,
-	})
-	if err != nil {
-		return err
-	}
-
-	oauthHandler, err := oauthui.New(oauthui.Config{
-		SupabaseURL:     cfg.SupabaseURL,
-		SupabaseAnonKey: cfg.SupabaseAnonKey,
-		Providers:       cfg.SupabaseOAuthProviders,
-	})
-	if err != nil {
-		return err
-	}
-
-	protectedMCP := mcpauth.RequireBearerToken(verifier.Verify, &mcpauth.RequireBearerTokenOptions{
-		ResourceMetadataURL: cfg.ResourceMetadataURL(),
-		Scopes:              cfg.RequiredScopes,
-	})(mcpHandler)
-
-	mux := http.NewServeMux()
-	mux.Handle("POST /mcp", protectedMCP)
-	mux.Handle("GET /mcp", protectedMCP)
-	mux.Handle("DELETE /mcp", protectedMCP)
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource", protectedResourceHandler(cfg))
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", protectedResourceHandler(cfg))
-	mux.Handle("GET /oauth/consent", oauthHandler)
-	mux.Handle("GET /oauth/callback", oauthHandler)
-	mux.HandleFunc("GET /healthz", healthHandler)
-	mux.HandleFunc("GET /readyz", readyHandler)
 
 	server := &http.Server{
 		Addr:              cfg.MCPAddr,
-		Handler:           loggingMiddleware(logger, securityHeaders(mux)),
+		Handler:           loggingMiddleware(logger, securityHeaders(handler)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -150,7 +107,7 @@ func serveAuthenticated(logger *slog.Logger, opts options) error {
 func serveLocal(logger *slog.Logger, opts options) error {
 	envAddr, envAddrSet := os.LookupEnv("MCP_ADDR")
 
-	cfg, _, err := config.LoadIntervalsDiscovered(config.DiscoveryOptions{
+	cfg, _, err := appruntime.LoadIntervalsDiscovered(appruntime.DiscoveryOptions{
 		EnvPath:     opts.EnvPath,
 		EnvExplicit: opts.EnvExplicit,
 	})
@@ -159,22 +116,15 @@ func serveLocal(logger *slog.Logger, opts options) error {
 	}
 
 	httpClient := &http.Client{Timeout: cfg.RequestTimeout}
-	mcpHandler, err := buildMCPHandler(cfg, httpClient)
+	handler, err := appruntime.NewLocalHTTPHandler(cfg, httpClient)
 	if err != nil {
 		return err
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle("POST /mcp", mcpHandler)
-	mux.Handle("GET /mcp", mcpHandler)
-	mux.Handle("DELETE /mcp", mcpHandler)
-	mux.HandleFunc("GET /healthz", healthHandler)
-	mux.HandleFunc("GET /readyz", readyHandler)
-
 	addr := localAddr(opts.Addr, envAddr, envAddrSet)
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           loggingMiddleware(logger, securityHeaders(mux)),
+		Handler:           loggingMiddleware(logger, securityHeaders(handler)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -185,7 +135,7 @@ func serveLocal(logger *slog.Logger, opts options) error {
 	return runHTTPServer(server, cfg.ShutdownTimeout)
 }
 
-func buildMCPHandler(cfg config.Config, httpClient *http.Client) (http.Handler, error) {
+func buildMCPHandler(cfg appruntime.Config, httpClient *http.Client) (http.Handler, error) {
 	return appruntime.NewMCPHTTPHandler(cfg, httpClient)
 }
 
@@ -237,35 +187,6 @@ func isLoopbackAddr(addr string) bool {
 		return ip.IsLoopback()
 	}
 	return false
-}
-
-func protectedResourceHandler(cfg config.Config) http.HandlerFunc {
-	metadata := oauthex.ProtectedResourceMetadata{
-		Resource:               cfg.MCPResource(),
-		AuthorizationServers:   []string{cfg.OIDCIssuerURL},
-		ScopesSupported:        cfg.RequiredScopes,
-		BearerMethodsSupported: []string{"header"},
-		ResourceName:           "Intervals.icu MCP",
-		ResourceDocumentation:  strings.TrimRight(cfg.MCPPublicURL, "/"),
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(metadata); err != nil {
-			http.Error(w, "encode metadata", http.StatusInternalServerError)
-		}
-	}
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
-}
-
-func readyHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ready"}`))
 }
 
 func securityHeaders(next http.Handler) http.Handler {

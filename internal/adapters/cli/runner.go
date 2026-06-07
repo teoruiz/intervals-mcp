@@ -14,17 +14,28 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/x/term"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/teoruiz/intervals-mcp/internal/config"
-	appruntime "github.com/teoruiz/intervals-mcp/internal/runtime"
+	"github.com/teoruiz/intervals-mcp/internal/domain"
+	"github.com/teoruiz/intervals-mcp/internal/platform/config"
 )
 
+type ServiceFactory func(config.Config, *http.Client) (Service, error)
+type MCPServerFactory func(config.Config, *http.Client) (*mcp.Server, error)
+type IntervalsClientFactory func(config.Config, *http.Client) (IntervalsClient, error)
+
+type IntervalsClient interface {
+	GetAthlete(context.Context) (*domain.Athlete, error)
+}
+
 type RunOptions struct {
-	Args       []string
-	BinaryName string
-	In         io.Reader
-	Out        io.Writer
-	ErrOut     io.Writer
-	WorkDir    string
+	Args               []string
+	BinaryName         string
+	In                 io.Reader
+	Out                io.Writer
+	ErrOut             io.Writer
+	WorkDir            string
+	NewService         ServiceFactory
+	NewMCPServer       MCPServerFactory
+	NewIntervalsClient IntervalsClientFactory
 }
 
 type runner struct {
@@ -33,6 +44,10 @@ type runner struct {
 	out     io.Writer
 	errOut  io.Writer
 	workDir string
+
+	newService         ServiceFactory
+	newMCPServer       MCPServerFactory
+	newIntervalsClient IntervalsClientFactory
 }
 
 func Run(ctx context.Context, opts RunOptions) error {
@@ -57,7 +72,10 @@ func Run(ctx context.Context, opts RunOptions) error {
 		if err != nil {
 			return err
 		}
-		service, err = appruntime.NewInsightsService(cfg, r.httpClientFor(cfg))
+		if r.newService == nil {
+			return errors.New("intervals service factory is required")
+		}
+		service, err = r.newService(cfg, r.httpClientFor(cfg))
 		if err != nil {
 			return err
 		}
@@ -93,6 +111,10 @@ func newRunner(opts RunOptions) *runner {
 		out:     out,
 		errOut:  errOut,
 		workDir: opts.WorkDir,
+
+		newService:         opts.NewService,
+		newMCPServer:       opts.NewMCPServer,
+		newIntervalsClient: opts.NewIntervalsClient,
 	}
 }
 
@@ -163,7 +185,10 @@ func (r *runner) runMCP(ctx context.Context, global GlobalOptions, args []string
 		if err != nil {
 			return err
 		}
-		server, err := appruntime.NewMCPServer(cfg, r.httpClientFor(cfg))
+		if r.newMCPServer == nil {
+			return errors.New("MCP server factory is required")
+		}
+		server, err := r.newMCPServer(cfg, r.httpClientFor(cfg))
 		if err != nil {
 			return err
 		}

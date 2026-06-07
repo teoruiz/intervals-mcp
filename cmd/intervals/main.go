@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/teoruiz/intervals-mcp/internal/cli"
+	appruntime "github.com/teoruiz/intervals-mcp/internal/platform/runtime"
 )
 
 func main() {
@@ -21,7 +21,7 @@ func main() {
 func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return cli.Run(ctx, cli.RunOptions{
+	return appruntime.RunCLI(ctx, appruntime.CLIRunOptions{
 		Args:       args,
 		BinaryName: filepath.Base(os.Args[0]),
 		In:         os.Stdin,

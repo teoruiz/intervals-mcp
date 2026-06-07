@@ -11,7 +11,7 @@ public behavior. It includes Intervals.icu write and delete endpoints because
 the upstream API includes them.
 
 This repository's MCP tools and CLI commands are intentionally read-only. The
-supported Intervals.icu calls are implemented in `internal/intervals`, which
-uses authenticated `GET` requests for the current feature set. Any future write
-support should be treated as an explicit product and security change, with
-matching docs, tests, and review.
+supported Intervals.icu calls are implemented in
+`internal/adapters/intervalsicu`, which uses authenticated `GET` requests for
+the current feature set. Any future write support should be treated as an
+explicit product and security change, with matching docs, tests, and review.

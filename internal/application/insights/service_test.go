@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/teoruiz/intervals-mcp/internal/intervals"
+	"github.com/teoruiz/intervals-mcp/internal/domain"
 )
 
 func TestTodayContextCombinesData(t *testing.T) {
@@ -16,8 +16,8 @@ func TestTodayContextCombinesData(t *testing.T) {
 	readiness := 72.5
 	eventID := 12
 	client := &fakeIntervals{
-		athlete: &intervals.Athlete{ID: "i123", Timezone: "Europe/Madrid"},
-		activities: []intervals.Activity{{
+		athlete: &domain.Athlete{ID: "i123", Timezone: "Europe/Madrid"},
+		activities: []domain.Activity{{
 			ID:            "a1",
 			Name:          "Morning Ride",
 			Type:          "Ride",
@@ -26,9 +26,9 @@ func TestTodayContextCombinesData(t *testing.T) {
 			CarbsIngested: &carbsIngested,
 			TrainingLoad:  &load,
 		}},
-		wellness:  &intervals.Wellness{ID: "2026-06-01", Readiness: &readiness},
-		summaries: []intervals.Summary{{Date: "2026-06-01"}},
-		events:    []intervals.Event{{ID: &eventID, Name: "Easy run", Category: "WORKOUT"}},
+		wellness:  &domain.Recovery{ID: "2026-06-01", Readiness: &readiness},
+		summaries: []domain.AthleteSummary{{Date: "2026-06-01"}},
+		events:    []domain.CalendarEvent{{ID: &eventID, Name: "Easy run", Category: "WORKOUT"}},
 	}
 	service := New(client)
 	service.now = func() time.Time { return time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC) }
@@ -50,8 +50,8 @@ func TestTodayContextCombinesData(t *testing.T) {
 
 func TestActivityWithRunningDynamics(t *testing.T) {
 	client := &fakeIntervals{
-		activity: &intervals.Activity{ID: "a1", Type: "Run"},
-		streams: []intervals.ActivityStream{
+		activity: &domain.Activity{ID: "a1", Type: "Run"},
+		streams: []domain.ActivityStream{
 			{Type: "GarminGCT", Data: []*float64{new(float64(200)), nil, new(float64(220))}},
 			{Type: "GarminVO", Data: []*float64{new(float64(8)), new(float64(10))}},
 		},
@@ -79,7 +79,7 @@ func TestActivityWithRunningDynamicsFromActivityFields(t *testing.T) {
 	vr := 7.91
 	vo2 := 43.9
 	client := &fakeIntervals{
-		activity: &intervals.Activity{
+		activity: &domain.Activity{
 			ID:                  "a1",
 			Type:                "Run",
 			GCT:                 &gct,
@@ -117,14 +117,14 @@ func TestActivityWithRunningDynamicsFromActivityFields(t *testing.T) {
 
 func TestActivityWithIntervalRunningDynamics(t *testing.T) {
 	client := &fakeIntervals{
-		activity: &intervals.Activity{
+		activity: &domain.Activity{
 			ID:   "a1",
 			Type: "Run",
 			Intervals: []any{
 				map[string]any{"id": float64(42), "type": "WORK", "start_index": float64(0), "end_index": float64(2)},
 			},
 		},
-		streams: []intervals.ActivityStream{
+		streams: []domain.ActivityStream{
 			{Type: "GarminGCT", Data: []*float64{new(float64(200)), new(float64(220))}},
 		},
 	}
@@ -151,12 +151,12 @@ func TestActivityWithIntervalRunningDynamics(t *testing.T) {
 
 func TestActivityIntervalRunningDynamicsRequiresBothFlags(t *testing.T) {
 	client := &fakeIntervals{
-		activity: &intervals.Activity{
+		activity: &domain.Activity{
 			ID:        "a1",
 			Type:      "Run",
 			Intervals: []any{map[string]any{"start_index": float64(0), "end_index": float64(2)}},
 		},
-		streams: []intervals.ActivityStream{
+		streams: []domain.ActivityStream{
 			{Type: "GarminGCT", Data: []*float64{new(float64(200)), new(float64(220))}},
 		},
 	}
@@ -184,7 +184,7 @@ func TestActivityIntervalRunningDynamicsRequiresBothFlags(t *testing.T) {
 }
 
 func TestActivityWithoutRunningDynamics(t *testing.T) {
-	client := &fakeIntervals{activity: &intervals.Activity{ID: "a1", Type: "Run"}}
+	client := &fakeIntervals{activity: &domain.Activity{ID: "a1", Type: "Run"}}
 	service := New(client)
 
 	detail, err := service.Activity(context.Background(), ActivityArgs{ID: "a1"})
@@ -201,7 +201,7 @@ func TestActivityWithoutRunningDynamics(t *testing.T) {
 
 func TestActivityRunningDynamicsAbsent(t *testing.T) {
 	client := &fakeIntervals{
-		activity: &intervals.Activity{ID: "a1", Type: "Run"},
+		activity: &domain.Activity{ID: "a1", Type: "Run"},
 		streams:  nil,
 	}
 	service := New(client)
@@ -219,51 +219,51 @@ func TestActivityRunningDynamicsAbsent(t *testing.T) {
 }
 
 type fakeIntervals struct {
-	athlete          *intervals.Athlete
-	activities       []intervals.Activity
-	activity         *intervals.Activity
-	streams          []intervals.ActivityStream
+	athlete          *domain.Athlete
+	activities       []domain.Activity
+	activity         *domain.Activity
+	streams          []domain.ActivityStream
 	streamsCalled    bool
 	includeIntervals bool
-	wellness         *intervals.Wellness
-	summaries        []intervals.Summary
-	events           []intervals.Event
+	wellness         *domain.Recovery
+	summaries        []domain.AthleteSummary
+	events           []domain.CalendarEvent
 }
 
-func (f *fakeIntervals) GetAthlete(context.Context) (*intervals.Athlete, error) {
+func (f *fakeIntervals) GetAthlete(context.Context) (*domain.Athlete, error) {
 	return f.athlete, nil
 }
 
-func (f *fakeIntervals) ListActivities(context.Context, string, string, int) ([]intervals.Activity, error) {
+func (f *fakeIntervals) ListActivities(context.Context, domain.ActivityQuery) ([]domain.Activity, error) {
 	return f.activities, nil
 }
 
-func (f *fakeIntervals) GetActivity(_ context.Context, _ string, includeIntervals bool) (*intervals.Activity, error) {
-	f.includeIntervals = includeIntervals
+func (f *fakeIntervals) GetActivity(_ context.Context, _ domain.ActivityID, opts domain.ActivityDetailOptions) (*domain.Activity, error) {
+	f.includeIntervals = opts.IncludeIntervals
 	if f.activity != nil {
 		return f.activity, nil
 	}
 	return &f.activities[0], nil
 }
 
-func (f *fakeIntervals) GetActivityStreams(context.Context, string, []string) ([]intervals.ActivityStream, error) {
+func (f *fakeIntervals) GetActivityRunningDynamicsStreams(context.Context, domain.ActivityID) ([]domain.ActivityStream, error) {
 	f.streamsCalled = true
 	return f.streams, nil
 }
 
-func (f *fakeIntervals) GetWellness(context.Context, string) (*intervals.Wellness, error) {
+func (f *fakeIntervals) GetRecovery(context.Context, domain.LocalDate) (*domain.Recovery, error) {
 	return f.wellness, nil
 }
 
-func (f *fakeIntervals) GetAthleteSummary(context.Context, string, string) ([]intervals.Summary, error) {
+func (f *fakeIntervals) GetAthleteSummary(context.Context, domain.DateRange) ([]domain.AthleteSummary, error) {
 	return f.summaries, nil
 }
 
-func (f *fakeIntervals) ListEvents(context.Context, string, string, []string, int) ([]intervals.Event, error) {
+func (f *fakeIntervals) ListEvents(context.Context, domain.EventQuery) ([]domain.CalendarEvent, error) {
 	return f.events, nil
 }
 
-func (f *fakeIntervals) GetEvent(context.Context, int) (*intervals.Event, error) {
+func (f *fakeIntervals) GetEvent(context.Context, domain.EventID) (*domain.CalendarEvent, error) {
 	if len(f.events) == 0 {
 		return nil, nil
 	}

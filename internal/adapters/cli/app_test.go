@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/teoruiz/intervals-mcp/internal/insights"
-	"github.com/teoruiz/intervals-mcp/internal/intervals"
+	"github.com/teoruiz/intervals-mcp/internal/application/insights"
+	"github.com/teoruiz/intervals-mcp/internal/domain"
 )
 
 func TestParseGlobalsAnywhere(t *testing.T) {
@@ -51,7 +51,7 @@ func TestTodayJSON(t *testing.T) {
 func TestActivitiesRoutesFlagsAndWritesTable(t *testing.T) {
 	load := 42
 	service := &fakeService{
-		activities: insights.ActivitiesContext{Activities: []intervals.Activity{{
+		activities: insights.ActivitiesContext{Activities: []domain.Activity{{
 			ID:             "a1",
 			Name:           "Morning Ride",
 			Type:           "Ride",
@@ -81,7 +81,7 @@ func TestActivitiesRoutesFlagsAndWritesTable(t *testing.T) {
 
 func TestActivityAllowsIntervalsAfterID(t *testing.T) {
 	service := &fakeService{
-		activity: &insights.ActivityDetail{Activity: &intervals.Activity{ID: "abc", Name: "Workout"}},
+		activity: &insights.ActivityDetail{Activity: &domain.Activity{ID: "abc", Name: "Workout"}},
 	}
 	var out bytes.Buffer
 	app := New(service, Options{NoStyle: true, Out: &out})
@@ -101,8 +101,8 @@ func TestActivityRendersRunningDynamics(t *testing.T) {
 	vo2 := 43.9
 	service := &fakeService{
 		activity: &insights.ActivityDetail{
-			Activity: &intervals.Activity{ID: "abc", Name: "Tempo", Type: "Run", AverageCadence: &cadence},
-			RunningDynamics: &intervals.RunningDynamics{
+			Activity: &domain.Activity{ID: "abc", Name: "Tempo", Type: "Run", AverageCadence: &cadence},
+			RunningDynamics: &domain.RunningDynamics{
 				Available:             true,
 				GroundContactTimeMs:   &gct,
 				VerticalOscillationCm: &vo,
@@ -132,12 +132,12 @@ func TestActivityJSONIncludesIntervalRunningDynamics(t *testing.T) {
 	intervalID := 42
 	service := &fakeService{
 		activity: &insights.ActivityDetail{
-			Activity: &intervals.Activity{ID: "abc", Name: "Tempo", Type: "Run"},
-			IntervalRunningDynamics: []intervals.IntervalRunningDynamics{{
+			Activity: &domain.Activity{ID: "abc", Name: "Tempo", Type: "Run"},
+			IntervalRunningDynamics: []domain.IntervalRunningDynamics{{
 				IntervalIndex: 0,
 				IntervalID:    &intervalID,
 				Type:          "WORK",
-				RunningDynamics: intervals.RunningDynamics{
+				RunningDynamics: domain.RunningDynamics{
 					Available:           true,
 					GroundContactTimeMs: &gct,
 				},
@@ -165,7 +165,7 @@ func TestActivityRendersNonRunCadenceAsRPM(t *testing.T) {
 	cadence := 90.0
 	service := &fakeService{
 		activity: &insights.ActivityDetail{
-			Activity: &intervals.Activity{ID: "abc", Name: "Ride", Type: "Ride", AverageCadence: &cadence},
+			Activity: &domain.Activity{ID: "abc", Name: "Ride", Type: "Ride", AverageCadence: &cadence},
 		},
 	}
 	var out bytes.Buffer
@@ -186,8 +186,8 @@ func TestActivityRendersNonRunCadenceAsRPM(t *testing.T) {
 func TestActivityRendersRunningDynamicsAbsentNote(t *testing.T) {
 	service := &fakeService{
 		activity: &insights.ActivityDetail{
-			Activity:        &intervals.Activity{ID: "abc", Name: "Tempo", Type: "Run"},
-			RunningDynamics: &intervals.RunningDynamics{Available: false, Note: "No Garmin running-dynamics streams found."},
+			Activity:        &domain.Activity{ID: "abc", Name: "Tempo", Type: "Run"},
+			RunningDynamics: &domain.RunningDynamics{Available: false, Note: "No Garmin running-dynamics streams found."},
 		},
 	}
 	var out bytes.Buffer

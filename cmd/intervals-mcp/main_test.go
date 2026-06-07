@@ -10,7 +10,7 @@ import (
 
 	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/teoruiz/intervals-mcp/internal/config"
+	appruntime "github.com/teoruiz/intervals-mcp/internal/platform/runtime"
 )
 
 func TestParseFlags(t *testing.T) {
@@ -91,8 +91,8 @@ func TestIsLoopbackAddr(t *testing.T) {
 	}
 }
 
-func testConfig() config.Config {
-	return config.Config{
+func testConfig() appruntime.Config {
+	return appruntime.Config{
 		IntervalsBaseURL:   "https://example.test",
 		IntervalsAPIKey:    "test-key",
 		IntervalsAthleteID: "i1",

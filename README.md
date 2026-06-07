@@ -30,10 +30,10 @@ git clone https://github.com/teoruiz/intervals-mcp
 go install ./cmd/intervals
 ```
 
-Compatibility binaries remain available:
+Install the MCP server binary separately only when you want to run the HTTP
+server directly:
 
 ```sh
-go install github.com/teoruiz/intervals-mcp/cmd/intervals-cli@latest
 go install github.com/teoruiz/intervals-mcp/cmd/intervals-mcp@latest
 ```
 
@@ -172,8 +172,7 @@ intervals config show
 ```
 
 Use `--env PATH` to load a specific dotenv file and `--json` for pipeable
-output. `intervals-cli` remains available for existing scripts, but new
-installations should use `intervals`.
+output.
 
 ## Remote MCP With Supabase
 
