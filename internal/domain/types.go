@@ -1,4 +1,32 @@
-package intervals
+package domain
+
+import "strings"
+
+type ActivityID string
+type EventID int
+type LocalDate string
+
+type DateRange struct {
+	Start string
+	End   string
+}
+
+type ActivityQuery struct {
+	Oldest string
+	Newest string
+	Limit  int
+}
+
+type ActivityDetailOptions struct {
+	IncludeIntervals bool
+}
+
+type EventQuery struct {
+	Oldest     string
+	Newest     string
+	Categories []string
+	Limit      int
+}
 
 type Athlete struct {
 	ID       string `json:"id,omitempty"`
@@ -48,7 +76,16 @@ type Activity struct {
 	Tags                []string `json:"tags,omitempty"`
 }
 
-type Wellness struct {
+type ActivityStream struct {
+	Type             string     `json:"type"`
+	Name             string     `json:"name,omitempty"`
+	Data             []*float64 `json:"data,omitempty"`
+	ValueTypeIsArray bool       `json:"valueTypeIsArray,omitempty"`
+	Custom           bool       `json:"custom,omitempty"`
+	AllNull          bool       `json:"allNull,omitempty"`
+}
+
+type Recovery struct {
 	ID            string   `json:"id,omitempty"`
 	CTL           *float64 `json:"ctl,omitempty"`
 	ATL           *float64 `json:"atl,omitempty"`
@@ -75,7 +112,7 @@ type Wellness struct {
 	FatTotal      *float64 `json:"fatTotal,omitempty"`
 }
 
-type Summary struct {
+type AthleteSummary struct {
 	Date         string            `json:"date,omitempty"`
 	Fitness      *float64          `json:"fitness,omitempty"`
 	Fatigue      *float64          `json:"fatigue,omitempty"`
@@ -105,7 +142,7 @@ type CategorySummary struct {
 	Distance           *float64 `json:"distance,omitempty"`
 }
 
-type Event struct {
+type CalendarEvent struct {
 	ID             *int     `json:"id,omitempty"`
 	Name           string   `json:"name,omitempty"`
 	Description    string   `json:"description,omitempty"`
@@ -124,4 +161,8 @@ type Event struct {
 	CarbsUsed      *int     `json:"carbs_used,omitempty"`
 	Indoor         *bool    `json:"indoor,omitempty"`
 	Tags           []string `json:"tags,omitempty"`
+}
+
+func IsRunType(activityType string) bool {
+	return strings.Contains(strings.ToLower(activityType), "run")
 }

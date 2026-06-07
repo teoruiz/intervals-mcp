@@ -1,6 +1,6 @@
 package insights
 
-import "github.com/teoruiz/intervals-mcp/internal/intervals"
+import "github.com/teoruiz/intervals-mcp/internal/domain"
 
 type TodayArgs struct {
 	Date string `json:"date,omitempty" jsonschema:"Optional local date in YYYY-MM-DD format. Defaults to today in the athlete timezone."`
@@ -21,9 +21,9 @@ type ActivityArgs struct {
 // ActivityDetail is a single activity enriched with optional running dynamics.
 // The embedded Activity keeps the JSON flat so existing consumers are unaffected.
 type ActivityDetail struct {
-	*intervals.Activity
-	RunningDynamics         *intervals.RunningDynamics          `json:"running_dynamics,omitempty"`
-	IntervalRunningDynamics []intervals.IntervalRunningDynamics `json:"interval_running_dynamics,omitempty"`
+	*domain.Activity
+	RunningDynamics         *domain.RunningDynamics          `json:"running_dynamics,omitempty"`
+	IntervalRunningDynamics []domain.IntervalRunningDynamics `json:"interval_running_dynamics,omitempty"`
 }
 
 type RecoveryArgs struct {
@@ -45,20 +45,20 @@ type FetchArgs struct {
 }
 
 type ActivitiesContext struct {
-	Activities []intervals.Activity `json:"activities"`
+	Activities []domain.Activity `json:"activities"`
 }
 
 type TodayContext struct {
-	Date          string               `json:"date"`
-	Timezone      string               `json:"timezone,omitempty"`
-	Athlete       *intervals.Athlete   `json:"athlete,omitempty"`
-	Recovery      *intervals.Wellness  `json:"recovery,omitempty"`
-	Summary       *intervals.Summary   `json:"summary,omitempty"`
-	Activities    []intervals.Activity `json:"activities"`
-	LastActivity  *intervals.Activity  `json:"last_activity,omitempty"`
-	PlannedEvents []intervals.Event    `json:"planned_events"`
-	Nutrition     NutritionContext     `json:"nutrition_context"`
-	Notes         []string             `json:"notes,omitempty"`
+	Date          string                 `json:"date"`
+	Timezone      string                 `json:"timezone,omitempty"`
+	Athlete       *domain.Athlete        `json:"athlete,omitempty"`
+	Recovery      *domain.Recovery       `json:"recovery,omitempty"`
+	Summary       *domain.AthleteSummary `json:"summary,omitempty"`
+	Activities    []domain.Activity      `json:"activities"`
+	LastActivity  *domain.Activity       `json:"last_activity,omitempty"`
+	PlannedEvents []domain.CalendarEvent `json:"planned_events"`
+	Nutrition     NutritionContext       `json:"nutrition_context"`
+	Notes         []string               `json:"notes,omitempty"`
 }
 
 type NutritionContext struct {
@@ -71,16 +71,16 @@ type NutritionContext struct {
 }
 
 type RecoveryContext struct {
-	Date     string              `json:"date"`
-	Recovery *intervals.Wellness `json:"recovery,omitempty"`
-	Summary  *intervals.Summary  `json:"summary,omitempty"`
-	Notes    []string            `json:"notes,omitempty"`
+	Date     string                 `json:"date"`
+	Recovery *domain.Recovery       `json:"recovery,omitempty"`
+	Summary  *domain.AthleteSummary `json:"summary,omitempty"`
+	Notes    []string               `json:"notes,omitempty"`
 }
 
 type CalendarContext struct {
-	Oldest string            `json:"oldest"`
-	Newest string            `json:"newest"`
-	Events []intervals.Event `json:"events"`
+	Oldest string                 `json:"oldest"`
+	Newest string                 `json:"newest"`
+	Events []domain.CalendarEvent `json:"events"`
 }
 
 type SearchResult struct {

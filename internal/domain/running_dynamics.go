@@ -1,27 +1,17 @@
-package intervals
-
-// ActivityStream is a single data stream for an activity (e.g. heart rate,
-// cadence, or a Garmin running-dynamics custom stream). Per-record data is
-// returned as a nullable array so missing samples decode as nil.
-type ActivityStream struct {
-	Type             string     `json:"type"`
-	Name             string     `json:"name,omitempty"`
-	Data             []*float64 `json:"data,omitempty"`
-	ValueTypeIsArray bool       `json:"valueTypeIsArray,omitempty"`
-	Custom           bool       `json:"custom,omitempty"`
-	AllNull          bool       `json:"allNull,omitempty"`
-}
+package domain
 
 const (
-	activityFieldGCT                 = "GCT"
-	activityFieldVerticalOscillation = "VerticalOscillation"
-	activityFieldVerticalRatio       = "VerticalRatio"
-	activityFieldVO2MaxGarmin        = "VO2MaxGarmin"
+	ActivityFieldGCT                 = "GCT"
+	ActivityFieldVerticalOscillation = "VerticalOscillation"
+	ActivityFieldVerticalRatio       = "VerticalRatio"
+	ActivityFieldVO2MaxGarmin        = "VO2MaxGarmin"
 )
 
-// Garmin running-dynamics custom stream type names used by Intervals.icu. These
-// only exist when the matching community custom fields are configured and the
-// activity has been re-analyzed.
+const (
+	runningDynamicsActivityNote = "No Garmin running-dynamics activity fields or streams found. Add the community custom activity fields in Intervals.icu and re-analyze the activity."
+	runningDynamicsIntervalNote = "No Garmin running-dynamics interval fields or streams found for this interval."
+)
+
 const (
 	streamGarminGCT              = "GarminGCT"
 	streamGarminVO               = "GarminVO"
@@ -35,30 +25,6 @@ const (
 	streamGarminStepSpeedLossPct = "GarminStepSpeedLossPercent"
 )
 
-var runningDynamicsStreamTypes = []string{
-	streamGarminGCT,
-	streamGarminVO,
-	streamGarminVerticalRatio,
-	streamGarminStepLength,
-	streamGarminGCTBalance,
-	streamGarminGCTPercent,
-	streamGarminImpactLoadFactor,
-	streamGarminGAPPace,
-	streamGarminStepSpeedLoss,
-	streamGarminStepSpeedLossPct,
-}
-
-// RunningDynamicsStreamTypes returns the Garmin running-dynamics stream type
-// names to request from the streams endpoint.
-func RunningDynamicsStreamTypes() []string {
-	out := make([]string, len(runningDynamicsStreamTypes))
-	copy(out, runningDynamicsStreamTypes)
-	return out
-}
-
-// RunningDynamics holds activity-level averages of Garmin running-dynamics
-// streams. Metrics absent from the activity stay nil; Available is false and
-// Note explains why when no dynamics were found.
 type RunningDynamics struct {
 	Available             bool     `json:"available"`
 	GroundContactTimeMs   *float64 `json:"ground_contact_time_ms,omitempty"`
@@ -75,9 +41,6 @@ type RunningDynamics struct {
 	Note                  string   `json:"note,omitempty"`
 }
 
-// IntervalRunningDynamics is an interval-aligned running-dynamics summary. The
-// interval metadata mirrors Intervals.icu so callers can join this record back
-// to the raw icu_intervals entry at the same index.
 type IntervalRunningDynamics struct {
 	IntervalIndex   int             `json:"interval_index"`
 	IntervalID      *int            `json:"interval_id,omitempty"`
@@ -90,45 +53,6 @@ type IntervalRunningDynamics struct {
 	RunningDynamics RunningDynamics `json:"running_dynamics"`
 }
 
-const (
-	runningDynamicsActivityNote = "No Garmin running-dynamics activity fields or streams found. Add the community custom activity fields in Intervals.icu and re-analyze the activity."
-	runningDynamicsIntervalNote = "No Garmin running-dynamics interval fields or streams found for this interval."
-)
-
-// meanNonNull returns the mean of the non-nil samples, or nil when there are none.
-func meanNonNull(data []*float64) *float64 {
-	var sum float64
-	var n int
-	for _, v := range data {
-		if v != nil {
-			sum += *v
-			n++
-		}
-	}
-	if n == 0 {
-		return nil
-	}
-	mean := sum / float64(n)
-	return &mean
-}
-
-// meanNonNullRange returns the mean of the non-nil samples in [start, end),
-// clamped to the available stream data.
-func meanNonNullRange(data []*float64, start, end int) *float64 {
-	if start < 0 {
-		start = 0
-	}
-	if end > len(data) {
-		end = len(data)
-	}
-	if end <= start {
-		return nil
-	}
-	return meanNonNull(data[start:end])
-}
-
-// AggregateRunningDynamics reduces per-record running-dynamics streams to
-// activity-level averages.
 func AggregateRunningDynamics(streams []ActivityStream) RunningDynamics {
 	byType := make(map[string]*float64, len(streams))
 	for _, s := range streams {
@@ -154,8 +78,6 @@ func AggregateRunningDynamics(streams []ActivityStream) RunningDynamics {
 	return rd
 }
 
-// AggregateIntervalRunningDynamics produces interval-aligned running-dynamics
-// summaries from raw Intervals.icu interval objects plus optional streams.
 func AggregateIntervalRunningDynamics(intervals []any, streams []ActivityStream) []IntervalRunningDynamics {
 	if len(intervals) == 0 {
 		return nil
@@ -168,69 +90,6 @@ func AggregateIntervalRunningDynamics(intervals []any, streams []ActivityStream)
 	return out
 }
 
-func intervalRunningDynamicsFromRaw(index int, raw any, streams []ActivityStream) IntervalRunningDynamics {
-	interval, _ := raw.(map[string]any)
-	record := IntervalRunningDynamics{
-		IntervalIndex: index,
-		IntervalID:    intPtrFromAny(interval["id"]),
-		Label:         stringFromAny(interval["label"]),
-		Type:          stringFromAny(interval["type"]),
-		StartIndex:    intPtrFromAny(interval["start_index"]),
-		EndIndex:      intPtrFromAny(interval["end_index"]),
-		StartTime:     intPtrFromAny(interval["start_time"]),
-		EndTime:       intPtrFromAny(interval["end_time"]),
-	}
-
-	dynamics := runningDynamicsFromIntervalFields(interval)
-	if record.StartIndex != nil && record.EndIndex != nil {
-		streamDynamics := aggregateRunningDynamicsRange(streams, *record.StartIndex, *record.EndIndex)
-		dynamics = MergeRunningDynamics(dynamics, streamDynamics)
-	}
-	if !dynamics.Available {
-		dynamics.Note = runningDynamicsIntervalNote
-	}
-	record.RunningDynamics = dynamics
-	return record
-}
-
-func runningDynamicsFromIntervalFields(interval map[string]any) RunningDynamics {
-	rd := RunningDynamics{
-		GroundContactTimeMs:   floatPtrFromAny(interval[activityFieldGCT]),
-		VerticalOscillationCm: floatPtrFromAny(interval[activityFieldVerticalOscillation]),
-		VerticalRatioPct:      floatPtrFromAny(interval[activityFieldVerticalRatio]),
-		VO2MaxGarmin:          floatPtrFromAny(interval[activityFieldVO2MaxGarmin]),
-	}
-	rd.finalizeAvailability()
-	return rd
-}
-
-func aggregateRunningDynamicsRange(streams []ActivityStream, start, end int) RunningDynamics {
-	byType := make(map[string]*float64, len(streams))
-	for _, s := range streams {
-		if s.AllNull {
-			continue
-		}
-		byType[s.Type] = meanNonNullRange(s.Data, start, end)
-	}
-
-	rd := RunningDynamics{
-		GroundContactTimeMs:   byType[streamGarminGCT],
-		VerticalOscillationCm: byType[streamGarminVO],
-		VerticalRatioPct:      byType[streamGarminVerticalRatio],
-		StepLengthMm:          byType[streamGarminStepLength],
-		GCTBalancePct:         byType[streamGarminGCTBalance],
-		GCTPct:                byType[streamGarminGCTPercent],
-		ImpactLoadFactor:      byType[streamGarminImpactLoadFactor],
-		GAPPaceMps:            byType[streamGarminGAPPace],
-		StepSpeedLossMps:      byType[streamGarminStepSpeedLoss],
-		StepSpeedLossPct:      byType[streamGarminStepSpeedLossPct],
-	}
-	rd.finalizeAvailability()
-	return rd
-}
-
-// RunningDynamicsFromActivity extracts Garmin running-dynamics summary values
-// exposed as activity-level custom fields.
 func RunningDynamicsFromActivity(activity *Activity) RunningDynamics {
 	var rd RunningDynamics
 	if activity != nil {
@@ -243,9 +102,6 @@ func RunningDynamicsFromActivity(activity *Activity) RunningDynamics {
 	return rd
 }
 
-// MergeRunningDynamics prefers primary values and fills missing metrics from
-// fallback. This keeps Intervals activity-field summaries authoritative while
-// still supporting stream-derived custom metrics.
 func MergeRunningDynamics(primary, fallback RunningDynamics) RunningDynamics {
 	if primary.GroundContactTimeMs == nil {
 		primary.GroundContactTimeMs = fallback.GroundContactTimeMs
@@ -282,6 +138,96 @@ func MergeRunningDynamics(primary, fallback RunningDynamics) RunningDynamics {
 	}
 	primary.finalizeAvailability()
 	return primary
+}
+
+func intervalRunningDynamicsFromRaw(index int, raw any, streams []ActivityStream) IntervalRunningDynamics {
+	interval, _ := raw.(map[string]any)
+	record := IntervalRunningDynamics{
+		IntervalIndex: index,
+		IntervalID:    intPtrFromAny(interval["id"]),
+		Label:         stringFromAny(interval["label"]),
+		Type:          stringFromAny(interval["type"]),
+		StartIndex:    intPtrFromAny(interval["start_index"]),
+		EndIndex:      intPtrFromAny(interval["end_index"]),
+		StartTime:     intPtrFromAny(interval["start_time"]),
+		EndTime:       intPtrFromAny(interval["end_time"]),
+	}
+
+	dynamics := runningDynamicsFromIntervalFields(interval)
+	if record.StartIndex != nil && record.EndIndex != nil {
+		streamDynamics := aggregateRunningDynamicsRange(streams, *record.StartIndex, *record.EndIndex)
+		dynamics = MergeRunningDynamics(dynamics, streamDynamics)
+	}
+	if !dynamics.Available {
+		dynamics.Note = runningDynamicsIntervalNote
+	}
+	record.RunningDynamics = dynamics
+	return record
+}
+
+func runningDynamicsFromIntervalFields(interval map[string]any) RunningDynamics {
+	rd := RunningDynamics{
+		GroundContactTimeMs:   floatPtrFromAny(interval[ActivityFieldGCT]),
+		VerticalOscillationCm: floatPtrFromAny(interval[ActivityFieldVerticalOscillation]),
+		VerticalRatioPct:      floatPtrFromAny(interval[ActivityFieldVerticalRatio]),
+		VO2MaxGarmin:          floatPtrFromAny(interval[ActivityFieldVO2MaxGarmin]),
+	}
+	rd.finalizeAvailability()
+	return rd
+}
+
+func aggregateRunningDynamicsRange(streams []ActivityStream, start, end int) RunningDynamics {
+	byType := make(map[string]*float64, len(streams))
+	for _, s := range streams {
+		if s.AllNull {
+			continue
+		}
+		byType[s.Type] = meanNonNullRange(s.Data, start, end)
+	}
+
+	rd := RunningDynamics{
+		GroundContactTimeMs:   byType[streamGarminGCT],
+		VerticalOscillationCm: byType[streamGarminVO],
+		VerticalRatioPct:      byType[streamGarminVerticalRatio],
+		StepLengthMm:          byType[streamGarminStepLength],
+		GCTBalancePct:         byType[streamGarminGCTBalance],
+		GCTPct:                byType[streamGarminGCTPercent],
+		ImpactLoadFactor:      byType[streamGarminImpactLoadFactor],
+		GAPPaceMps:            byType[streamGarminGAPPace],
+		StepSpeedLossMps:      byType[streamGarminStepSpeedLoss],
+		StepSpeedLossPct:      byType[streamGarminStepSpeedLossPct],
+	}
+	rd.finalizeAvailability()
+	return rd
+}
+
+func meanNonNull(data []*float64) *float64 {
+	var sum float64
+	var n int
+	for _, v := range data {
+		if v != nil {
+			sum += *v
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	mean := sum / float64(n)
+	return &mean
+}
+
+func meanNonNullRange(data []*float64, start, end int) *float64 {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(data) {
+		end = len(data)
+	}
+	if end <= start {
+		return nil
+	}
+	return meanNonNull(data[start:end])
 }
 
 func (rd *RunningDynamics) finalizeAvailability() {

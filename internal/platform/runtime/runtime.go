@@ -4,14 +4,14 @@ import (
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/teoruiz/intervals-mcp/internal/config"
-	"github.com/teoruiz/intervals-mcp/internal/insights"
-	"github.com/teoruiz/intervals-mcp/internal/intervals"
-	"github.com/teoruiz/intervals-mcp/internal/mcpserver"
+	"github.com/teoruiz/intervals-mcp/internal/adapters/intervalsicu"
+	mcpadapter "github.com/teoruiz/intervals-mcp/internal/adapters/mcp"
+	"github.com/teoruiz/intervals-mcp/internal/application/insights"
+	"github.com/teoruiz/intervals-mcp/internal/platform/config"
 )
 
-func NewIntervalsClient(cfg config.Config, httpClient *http.Client) (*intervals.Client, error) {
-	return intervals.NewClient(intervals.Config{
+func NewIntervalsClient(cfg config.Config, httpClient *http.Client) (*intervalsicu.Client, error) {
+	return intervalsicu.NewClient(intervalsicu.Config{
 		BaseURL:    cfg.IntervalsBaseURL,
 		APIKey:     cfg.IntervalsAPIKey,
 		AthleteID:  cfg.IntervalsAthleteID,
@@ -33,7 +33,7 @@ func NewMCPServer(cfg config.Config, httpClient *http.Client) (*mcp.Server, erro
 	if err != nil {
 		return nil, err
 	}
-	return mcpserver.New(service), nil
+	return mcpadapter.New(service), nil
 }
 
 func NewMCPHTTPHandler(cfg config.Config, httpClient *http.Client) (http.Handler, error) {

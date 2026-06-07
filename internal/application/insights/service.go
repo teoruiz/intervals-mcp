@@ -8,36 +8,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/teoruiz/intervals-mcp/internal/intervals"
+	"github.com/teoruiz/intervals-mcp/internal/domain"
 )
 
-type IntervalsClient interface {
-	GetAthlete(context.Context) (*intervals.Athlete, error)
-	ListActivities(context.Context, string, string, int) ([]intervals.Activity, error)
-	GetActivity(context.Context, string, bool) (*intervals.Activity, error)
-	GetActivityStreams(context.Context, string, []string) ([]intervals.ActivityStream, error)
-	GetWellness(context.Context, string) (*intervals.Wellness, error)
-	GetAthleteSummary(context.Context, string, string) ([]intervals.Summary, error)
-	ListEvents(context.Context, string, string, []string, int) ([]intervals.Event, error)
-	GetEvent(context.Context, int) (*intervals.Event, error)
-}
-
 type Service struct {
-	client IntervalsClient
-	now    func() time.Time
+	repo Repository
+	now  func() time.Time
 }
 
-func New(client IntervalsClient) *Service {
-	return &Service{client: client, now: time.Now}
+func New(repo Repository) *Service {
+	return &Service{repo: repo, now: time.Now}
 }
 
 func (s *Service) TodayContext(ctx context.Context, args TodayArgs) (TodayContext, error) {
 	athlete, date, tz := s.resolveDate(ctx, args.Date)
-	activities, err := s.client.ListActivities(ctx, date, date, 20)
+	activities, err := s.repo.ListActivities(ctx, domain.ActivityQuery{Oldest: date, Newest: date, Limit: 20})
 	if err != nil {
 		return TodayContext{}, fmt.Errorf("list today's activities: %w", err)
 	}
-	recovery, err := s.client.GetWellness(ctx, date)
+	recovery, err := s.repo.GetRecovery(ctx, domain.LocalDate(date))
 	if err != nil {
 		return TodayContext{}, fmt.Errorf("get recovery: %w", err)
 	}
@@ -45,12 +34,12 @@ func (s *Service) TodayContext(ctx context.Context, args TodayArgs) (TodayContex
 	if err != nil {
 		return TodayContext{}, err
 	}
-	events, err := s.client.ListEvents(ctx, date, date, nil, 20)
+	events, err := s.repo.ListEvents(ctx, domain.EventQuery{Oldest: date, Newest: date, Limit: 20})
 	if err != nil {
 		return TodayContext{}, fmt.Errorf("list calendar: %w", err)
 	}
 
-	var last *intervals.Activity
+	var last *domain.Activity
 	if len(activities) > 0 {
 		last = &activities[0]
 	}
@@ -85,7 +74,7 @@ func (s *Service) RecentActivities(ctx context.Context, args RecentActivitiesArg
 			oldest = today
 		}
 	}
-	activities, err := s.client.ListActivities(ctx, oldest, newest, limit)
+	activities, err := s.repo.ListActivities(ctx, domain.ActivityQuery{Oldest: oldest, Newest: newest, Limit: limit})
 	if err != nil {
 		return ActivitiesContext{}, fmt.Errorf("list recent activities: %w", err)
 	}
@@ -96,21 +85,21 @@ func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*ActivityDet
 	if strings.TrimSpace(args.ID) == "" {
 		return nil, errors.New("id is required")
 	}
-	activity, err := s.client.GetActivity(ctx, args.ID, args.IncludeIntervals)
+	activity, err := s.repo.GetActivity(ctx, domain.ActivityID(args.ID), domain.ActivityDetailOptions{IncludeIntervals: args.IncludeIntervals})
 	if err != nil {
 		return nil, fmt.Errorf("get activity: %w", err)
 	}
 	detail := &ActivityDetail{Activity: activity}
 	if args.IncludeRunningDynamics {
-		dynamics := intervals.RunningDynamicsFromActivity(activity)
-		streams, err := s.client.GetActivityStreams(ctx, args.ID, intervals.RunningDynamicsStreamTypes())
+		dynamics := domain.RunningDynamicsFromActivity(activity)
+		streams, err := s.repo.GetActivityRunningDynamicsStreams(ctx, domain.ActivityID(args.ID))
 		if err != nil {
 			return nil, fmt.Errorf("get activity streams: %w", err)
 		}
-		dynamics = intervals.MergeRunningDynamics(dynamics, intervals.AggregateRunningDynamics(streams))
+		dynamics = domain.MergeRunningDynamics(dynamics, domain.AggregateRunningDynamics(streams))
 		detail.RunningDynamics = &dynamics
 		if args.IncludeIntervals {
-			detail.IntervalRunningDynamics = intervals.AggregateIntervalRunningDynamics(activity.Intervals, streams)
+			detail.IntervalRunningDynamics = domain.AggregateIntervalRunningDynamics(activity.Intervals, streams)
 		}
 	}
 	return detail, nil
@@ -118,7 +107,7 @@ func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*ActivityDet
 
 func (s *Service) Recovery(ctx context.Context, args RecoveryArgs) (RecoveryContext, error) {
 	_, date, _ := s.resolveDate(ctx, args.Date)
-	recovery, err := s.client.GetWellness(ctx, date)
+	recovery, err := s.repo.GetRecovery(ctx, domain.LocalDate(date))
 	if err != nil {
 		return RecoveryContext{}, fmt.Errorf("get wellness: %w", err)
 	}
@@ -149,7 +138,7 @@ func (s *Service) Calendar(ctx context.Context, args CalendarArgs) (CalendarCont
 			newest = oldest
 		}
 	}
-	events, err := s.client.ListEvents(ctx, oldest, newest, args.Categories, 100)
+	events, err := s.repo.ListEvents(ctx, domain.EventQuery{Oldest: oldest, Newest: newest, Categories: args.Categories, Limit: 100})
 	if err != nil {
 		return CalendarContext{}, fmt.Errorf("list calendar: %w", err)
 	}
@@ -169,15 +158,15 @@ func (s *Service) Search(ctx context.Context, args SearchArgs) (SearchResult, er
 		upcoming = start.AddDate(0, 0, 14).Format(time.DateOnly)
 	}
 
-	activities, err := s.client.ListActivities(ctx, oldest, newest, 50)
+	activities, err := s.repo.ListActivities(ctx, domain.ActivityQuery{Oldest: oldest, Newest: newest, Limit: 50})
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("search activities: %w", err)
 	}
-	events, err := s.client.ListEvents(ctx, today, upcoming, nil, 50)
+	events, err := s.repo.ListEvents(ctx, domain.EventQuery{Oldest: today, Newest: upcoming, Limit: 50})
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("search events: %w", err)
 	}
-	recovery, err := s.client.GetWellness(ctx, today)
+	recovery, err := s.repo.GetRecovery(ctx, domain.LocalDate(today))
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("search recovery: %w", err)
 	}
@@ -218,14 +207,14 @@ func (s *Service) Fetch(ctx context.Context, args FetchArgs) (FetchResult, error
 	}
 	switch kind {
 	case "activity":
-		activity, err := s.client.GetActivity(ctx, id, false)
+		activity, err := s.repo.GetActivity(ctx, domain.ActivityID(id), domain.ActivityDetailOptions{})
 		if err != nil {
 			return FetchResult{}, fmt.Errorf("fetch activity: %w", err)
 		}
 		record := activityRecord(*activity)
 		return FetchResult{ID: record.ID, Title: record.Title, Text: record.Text, Record: activity}, nil
 	case "recovery":
-		recovery, err := s.client.GetWellness(ctx, id)
+		recovery, err := s.repo.GetRecovery(ctx, domain.LocalDate(id))
 		if err != nil {
 			return FetchResult{}, fmt.Errorf("fetch recovery: %w", err)
 		}
@@ -240,7 +229,7 @@ func (s *Service) Fetch(ctx context.Context, args FetchArgs) (FetchResult, error
 		if err != nil {
 			return FetchResult{}, fmt.Errorf("invalid event id: %w", err)
 		}
-		event, err := s.client.GetEvent(ctx, eventID)
+		event, err := s.repo.GetEvent(ctx, domain.EventID(eventID))
 		if err != nil {
 			return FetchResult{}, fmt.Errorf("fetch event: %w", err)
 		}
@@ -254,8 +243,8 @@ func (s *Service) Fetch(ctx context.Context, args FetchArgs) (FetchResult, error
 	}
 }
 
-func (s *Service) resolveDate(ctx context.Context, explicit string) (*intervals.Athlete, string, string) {
-	athlete, _ := s.client.GetAthlete(ctx)
+func (s *Service) resolveDate(ctx context.Context, explicit string) (*domain.Athlete, string, string) {
+	athlete, _ := s.repo.GetAthlete(ctx)
 	location := time.Local
 	timezone := ""
 	if athlete != nil && athlete.Timezone != "" {
@@ -270,8 +259,8 @@ func (s *Service) resolveDate(ctx context.Context, explicit string) (*intervals.
 	return athlete, s.now().In(location).Format(time.DateOnly), timezone
 }
 
-func (s *Service) summaryForDate(ctx context.Context, date string) (*intervals.Summary, error) {
-	summaries, err := s.client.GetAthleteSummary(ctx, date, date)
+func (s *Service) summaryForDate(ctx context.Context, date string) (*domain.AthleteSummary, error) {
+	summaries, err := s.repo.GetAthleteSummary(ctx, domain.DateRange{Start: date, End: date})
 	if err != nil {
 		return nil, fmt.Errorf("get athlete summary: %w", err)
 	}
@@ -281,7 +270,7 @@ func (s *Service) summaryForDate(ctx context.Context, date string) (*intervals.S
 	return &summaries[0], nil
 }
 
-func nutritionContext(activities []intervals.Activity) NutritionContext {
+func nutritionContext(activities []domain.Activity) NutritionContext {
 	var calories, carbsUsed, carbsIngested, load int
 	for _, activity := range activities {
 		calories += intValue(activity.Calories)
@@ -304,7 +293,7 @@ func nutritionContext(activities []intervals.Activity) NutritionContext {
 	}
 }
 
-func availabilityNotes(recovery *intervals.Wellness, summary *intervals.Summary, activities []intervals.Activity, events []intervals.Event) []string {
+func availabilityNotes(recovery *domain.Recovery, summary *domain.AthleteSummary, activities []domain.Activity, events []domain.CalendarEvent) []string {
 	var notes []string
 	if recovery == nil {
 		notes = append(notes, "No wellness record was available for this date.")
@@ -321,7 +310,7 @@ func availabilityNotes(recovery *intervals.Wellness, summary *intervals.Summary,
 	return notes
 }
 
-func activityRecord(activity intervals.Activity) SearchRecord {
+func activityRecord(activity domain.Activity) SearchRecord {
 	title := activity.Name
 	if title == "" {
 		title = strings.TrimSpace(activity.Type + " " + activity.StartDateLocal)
@@ -340,7 +329,7 @@ func activityRecord(activity intervals.Activity) SearchRecord {
 	}
 }
 
-func eventRecord(event intervals.Event) SearchRecord {
+func eventRecord(event domain.CalendarEvent) SearchRecord {
 	if event.ID == nil {
 		return SearchRecord{}
 	}
@@ -361,7 +350,7 @@ func eventRecord(event intervals.Event) SearchRecord {
 	}
 }
 
-func recoveryText(date string, recovery *intervals.Wellness) string {
+func recoveryText(date string, recovery *domain.Recovery) string {
 	if recovery == nil {
 		return "No recovery record available for " + date + "."
 	}

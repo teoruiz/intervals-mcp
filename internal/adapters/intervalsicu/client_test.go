@@ -1,4 +1,4 @@
-package intervals
+package intervalsicu
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/teoruiz/intervals-mcp/internal/domain"
 )
 
 func TestListActivitiesRequest(t *testing.T) {
@@ -38,7 +40,7 @@ func TestListActivitiesRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activities, err := client.ListActivities(context.Background(), "2026-06-01", "", 10)
+	activities, err := client.ListActivities(context.Background(), domain.ActivityQuery{Oldest: "2026-06-01", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +74,7 @@ func TestGetActivityStreamsRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	streams, err := client.GetActivityStreams(context.Background(), "a1", RunningDynamicsStreamTypes())
+	streams, err := client.GetActivityRunningDynamicsStreams(context.Background(), domain.ActivityID("a1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,13 +95,36 @@ func TestNotFoundMapsToNilWellness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wellness, err := client.GetWellness(context.Background(), "2026-06-01")
+	wellness, err := client.GetRecovery(context.Background(), domain.LocalDate("2026-06-01"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if wellness != nil {
 		t.Fatalf("wellness = %#v, want nil", wellness)
 	}
+}
+
+func TestNormalizeActivityDoublesRunCadence(t *testing.T) {
+	run := &domain.Activity{Type: "Run", AverageCadence: new(float64(75))}
+	normalizeActivity(run)
+	if run.AverageCadence == nil || *run.AverageCadence != 150 {
+		t.Fatalf("run cadence = %v, want 150 spm", run.AverageCadence)
+	}
+
+	trail := &domain.Activity{Type: "TrailRun", AverageCadence: new(float64(80))}
+	normalizeActivity(trail)
+	if trail.AverageCadence == nil || *trail.AverageCadence != 160 {
+		t.Fatalf("trail cadence = %v, want 160 spm", trail.AverageCadence)
+	}
+
+	ride := &domain.Activity{Type: "Ride", AverageCadence: new(float64(90))}
+	normalizeActivity(ride)
+	if ride.AverageCadence == nil || *ride.AverageCadence != 90 {
+		t.Fatalf("ride cadence = %v, want 90 (unchanged)", ride.AverageCadence)
+	}
+
+	normalizeActivity(nil)                           // must not panic
+	normalizeActivity(&domain.Activity{Type: "Run"}) // nil cadence must not panic
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

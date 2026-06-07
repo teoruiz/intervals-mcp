@@ -1,4 +1,4 @@
-package intervals
+package intervalsicu
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/teoruiz/intervals-mcp/internal/domain"
 )
 
 var ErrNotFound = errors.New("intervals resource not found")
@@ -76,29 +78,31 @@ func (c *Client) AthleteID() string {
 	return c.athleteID
 }
 
-func (c *Client) GetAthlete(ctx context.Context) (*Athlete, error) {
-	var athlete Athlete
-	if err := c.get(ctx, c.athletePath(), nil, &athlete); err != nil {
+func (c *Client) GetAthlete(ctx context.Context) (*domain.Athlete, error) {
+	var dto athleteDTO
+	if err := c.get(ctx, c.athletePath(), nil, &dto); err != nil {
 		return nil, err
 	}
+	athlete := mapAthlete(dto)
 	return &athlete, nil
 }
 
-func (c *Client) ListActivities(ctx context.Context, oldest, newest string, limit int) ([]Activity, error) {
+func (c *Client) ListActivities(ctx context.Context, query domain.ActivityQuery) ([]domain.Activity, error) {
 	values := url.Values{}
-	values.Set("oldest", oldest)
-	if newest != "" {
-		values.Set("newest", newest)
+	values.Set("oldest", query.Oldest)
+	if query.Newest != "" {
+		values.Set("newest", query.Newest)
 	}
-	if limit > 0 {
-		values.Set("limit", strconv.Itoa(limit))
+	if query.Limit > 0 {
+		values.Set("limit", strconv.Itoa(query.Limit))
 	}
 	values.Set("fields", strings.Join(activityListFields, ","))
 
-	var activities []Activity
-	if err := c.get(ctx, c.athletePath("activities"), values, &activities); err != nil {
+	var dtos []activityDTO
+	if err := c.get(ctx, c.athletePath("activities"), values, &dtos); err != nil {
 		return nil, err
 	}
+	activities := mapActivities(dtos)
 	for i := range activities {
 		normalizeActivity(&activities[i])
 	}
@@ -108,30 +112,26 @@ func (c *Client) ListActivities(ctx context.Context, oldest, newest string, limi
 // normalizeActivity converts raw Intervals values into the units the rest of
 // the app uses. Intervals stores running cadence per leg; double it to steps
 // per minute, the standard running measure shown by watches and platforms.
-func normalizeActivity(a *Activity) {
+func normalizeActivity(a *domain.Activity) {
 	if a == nil {
 		return
 	}
-	if a.AverageCadence != nil && IsRunType(a.Type) {
+	if a.AverageCadence != nil && domain.IsRunType(a.Type) {
 		spm := *a.AverageCadence * 2
 		a.AverageCadence = &spm
 	}
 }
 
-// IsRunType reports whether an activity type is a run (Run, TrailRun, VirtualRun, etc.).
-func IsRunType(activityType string) bool {
-	return strings.Contains(strings.ToLower(activityType), "run")
-}
-
-func (c *Client) GetActivity(ctx context.Context, id string, includeIntervals bool) (*Activity, error) {
+func (c *Client) GetActivity(ctx context.Context, id domain.ActivityID, opts domain.ActivityDetailOptions) (*domain.Activity, error) {
 	values := url.Values{}
-	if includeIntervals {
+	if opts.IncludeIntervals {
 		values.Set("intervals", "true")
 	}
-	var activity Activity
-	if err := c.get(ctx, "/api/v1/activity/"+url.PathEscape(id), values, &activity); err != nil {
+	var dto activityDTO
+	if err := c.get(ctx, "/api/v1/activity/"+url.PathEscape(string(id)), values, &dto); err != nil {
 		return nil, err
 	}
+	activity := mapActivity(dto)
 	normalizeActivity(&activity)
 	return &activity, nil
 }
@@ -139,73 +139,79 @@ func (c *Client) GetActivity(ctx context.Context, id string, includeIntervals bo
 // GetActivityStreams fetches the named data streams for an activity. Requested
 // types that the activity does not have are simply omitted from the response;
 // an empty result is normal and not an error.
-func (c *Client) GetActivityStreams(ctx context.Context, id string, types []string) ([]ActivityStream, error) {
+func (c *Client) getActivityStreams(ctx context.Context, id domain.ActivityID, types []string) ([]domain.ActivityStream, error) {
 	values := url.Values{}
 	for _, t := range types {
 		values.Add("types", t)
 	}
-	var streams []ActivityStream
-	if err := c.get(ctx, "/api/v1/activity/"+url.PathEscape(id)+"/streams", values, &streams); err != nil {
+	var dtos []activityStreamDTO
+	if err := c.get(ctx, "/api/v1/activity/"+url.PathEscape(string(id))+"/streams", values, &dtos); err != nil {
 		return nil, err
 	}
-	return streams, nil
+	return mapActivityStreams(dtos), nil
 }
 
-func (c *Client) GetWellness(ctx context.Context, date string) (*Wellness, error) {
-	var wellness Wellness
-	if err := c.get(ctx, c.athletePath("wellness", date), nil, &wellness); err != nil {
+func (c *Client) GetActivityRunningDynamicsStreams(ctx context.Context, id domain.ActivityID) ([]domain.ActivityStream, error) {
+	return c.getActivityStreams(ctx, id, runningDynamicsStreamTypes())
+}
+
+func (c *Client) GetRecovery(ctx context.Context, date domain.LocalDate) (*domain.Recovery, error) {
+	var dto recoveryDTO
+	if err := c.get(ctx, c.athletePath("wellness", string(date)), nil, &dto); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &wellness, nil
+	recovery := mapRecovery(dto)
+	return &recovery, nil
 }
 
-func (c *Client) GetAthleteSummary(ctx context.Context, start, end string) ([]Summary, error) {
+func (c *Client) GetAthleteSummary(ctx context.Context, dateRange domain.DateRange) ([]domain.AthleteSummary, error) {
 	values := url.Values{}
-	if start != "" {
-		values.Set("start", start)
+	if dateRange.Start != "" {
+		values.Set("start", dateRange.Start)
 	}
-	if end != "" {
-		values.Set("end", end)
+	if dateRange.End != "" {
+		values.Set("end", dateRange.End)
 	}
-	var summaries []Summary
-	if err := c.get(ctx, c.athletePath("athlete-summary"), values, &summaries); err != nil {
+	var dtos []athleteSummaryDTO
+	if err := c.get(ctx, c.athletePath("athlete-summary"), values, &dtos); err != nil {
 		return nil, err
 	}
-	return summaries, nil
+	return mapAthleteSummaries(dtos), nil
 }
 
-func (c *Client) ListEvents(ctx context.Context, oldest, newest string, categories []string, limit int) ([]Event, error) {
+func (c *Client) ListEvents(ctx context.Context, query domain.EventQuery) ([]domain.CalendarEvent, error) {
 	values := url.Values{}
-	if oldest != "" {
-		values.Set("oldest", oldest)
+	if query.Oldest != "" {
+		values.Set("oldest", query.Oldest)
 	}
-	if newest != "" {
-		values.Set("newest", newest)
+	if query.Newest != "" {
+		values.Set("newest", query.Newest)
 	}
-	if len(categories) > 0 {
-		values.Set("category", strings.Join(categories, ","))
+	if len(query.Categories) > 0 {
+		values.Set("category", strings.Join(query.Categories, ","))
 	}
-	if limit > 0 {
-		values.Set("limit", strconv.Itoa(limit))
+	if query.Limit > 0 {
+		values.Set("limit", strconv.Itoa(query.Limit))
 	}
-	var events []Event
-	if err := c.get(ctx, c.athletePath("events"), values, &events); err != nil {
+	var dtos []calendarEventDTO
+	if err := c.get(ctx, c.athletePath("events"), values, &dtos); err != nil {
 		return nil, err
 	}
-	return events, nil
+	return mapCalendarEvents(dtos), nil
 }
 
-func (c *Client) GetEvent(ctx context.Context, id int) (*Event, error) {
-	var event Event
-	if err := c.get(ctx, c.athletePath("events", strconv.Itoa(id)), nil, &event); err != nil {
+func (c *Client) GetEvent(ctx context.Context, id domain.EventID) (*domain.CalendarEvent, error) {
+	var dto calendarEventDTO
+	if err := c.get(ctx, c.athletePath("events", strconv.Itoa(int(id))), nil, &dto); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	event := mapCalendarEvent(dto)
 	return &event, nil
 }
 
@@ -282,10 +288,10 @@ var activityListFields = []string{
 	"average_stride",
 	"avg_lr_balance",
 	"gap",
-	activityFieldGCT,
-	activityFieldVerticalOscillation,
-	activityFieldVerticalRatio,
-	activityFieldVO2MaxGarmin,
+	domain.ActivityFieldGCT,
+	domain.ActivityFieldVerticalOscillation,
+	domain.ActivityFieldVerticalRatio,
+	domain.ActivityFieldVO2MaxGarmin,
 	"perceived_exertion",
 	"session_rpe",
 	"icu_rpe",
