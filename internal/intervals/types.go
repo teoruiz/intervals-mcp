@@ -1,5 +1,11 @@
 package intervals
 
+import (
+	"encoding/json"
+	"reflect"
+	"strings"
+)
+
 type Athlete struct {
 	ID       string `json:"id,omitempty"`
 	Name     string `json:"name,omitempty"`
@@ -49,30 +55,104 @@ type Activity struct {
 }
 
 type Wellness struct {
-	ID            string   `json:"id,omitempty"`
-	CTL           *float64 `json:"ctl,omitempty"`
-	ATL           *float64 `json:"atl,omitempty"`
-	RampRate      *float64 `json:"rampRate,omitempty"`
-	Weight        *float64 `json:"weight,omitempty"`
-	RestingHR     *int     `json:"restingHR,omitempty"`
-	HRV           *float64 `json:"hrv,omitempty"`
-	HRVSDNN       *float64 `json:"hrvSDNN,omitempty"`
-	KcalConsumed  *int     `json:"kcalConsumed,omitempty"`
-	SleepSecs     *int     `json:"sleepSecs,omitempty"`
-	SleepScore    *float64 `json:"sleepScore,omitempty"`
-	SleepQuality  *int     `json:"sleepQuality,omitempty"`
-	AvgSleepingHR *float64 `json:"avgSleepingHR,omitempty"`
-	Soreness      *int     `json:"soreness,omitempty"`
-	Fatigue       *int     `json:"fatigue,omitempty"`
-	Stress        *int     `json:"stress,omitempty"`
-	Mood          *int     `json:"mood,omitempty"`
-	Motivation    *int     `json:"motivation,omitempty"`
-	Hydration     *int     `json:"hydration,omitempty"`
-	Readiness     *float64 `json:"readiness,omitempty"`
-	Comments      string   `json:"comments,omitempty"`
-	Carbohydrates *float64 `json:"carbohydrates,omitempty"`
-	Protein       *float64 `json:"protein,omitempty"`
-	FatTotal      *float64 `json:"fatTotal,omitempty"`
+	ID              string   `json:"id,omitempty"`
+	CTL             *float64 `json:"ctl,omitempty"`
+	ATL             *float64 `json:"atl,omitempty"`
+	RampRate        *float64 `json:"rampRate,omitempty"`
+	Weight          *float64 `json:"weight,omitempty"`
+	RestingHR       *int     `json:"restingHR,omitempty"`
+	HRV             *float64 `json:"hrv,omitempty"`
+	HRVSDNN         *float64 `json:"hrvSDNN,omitempty"`
+	BaevskySI       *float64 `json:"baevskySI,omitempty"`
+	KcalConsumed    *int     `json:"kcalConsumed,omitempty"`
+	SleepSecs       *int     `json:"sleepSecs,omitempty"`
+	SleepScore      *float64 `json:"sleepScore,omitempty"`
+	SleepQuality    *int     `json:"sleepQuality,omitempty"`
+	AvgSleepingHR   *float64 `json:"avgSleepingHR,omitempty"`
+	Soreness        *int     `json:"soreness,omitempty"`
+	Fatigue         *int     `json:"fatigue,omitempty"`
+	Stress          *int     `json:"stress,omitempty"`
+	Mood            *int     `json:"mood,omitempty"`
+	Motivation      *int     `json:"motivation,omitempty"`
+	Injury          *int     `json:"injury,omitempty"`
+	Hydration       *int     `json:"hydration,omitempty"`
+	HydrationVolume *float64 `json:"hydrationVolume,omitempty"`
+	Readiness       *float64 `json:"readiness,omitempty"`
+	Steps           *int     `json:"steps,omitempty"`
+	Respiration     *float64 `json:"respiration,omitempty"`
+	SpO2            *float64 `json:"spO2,omitempty"`
+	VO2Max          *float64 `json:"vo2max,omitempty"`
+	Systolic        *int     `json:"systolic,omitempty"`
+	Diastolic       *int     `json:"diastolic,omitempty"`
+	BloodGlucose    *float64 `json:"bloodGlucose,omitempty"`
+	Lactate         *float64 `json:"lactate,omitempty"`
+	BodyFat         *float64 `json:"bodyFat,omitempty"`
+	MenstrualPhase  string   `json:"menstrualPhase,omitempty"`
+	Comments        string   `json:"comments,omitempty"`
+	Carbohydrates   *float64 `json:"carbohydrates,omitempty"`
+	Protein         *float64 `json:"protein,omitempty"`
+	FatTotal        *float64 `json:"fatTotal,omitempty"`
+	// Extra carries wellness keys not modeled above, mainly custom wellness
+	// fields such as Garmin stress or Body Battery synced by Intervals.icu.
+	Extra map[string]any `json:"extra_fields,omitempty"`
+}
+
+// wellnessNoiseKeys are wellness response keys that carry no athlete metric
+// value and would otherwise clutter Extra.
+var wellnessNoiseKeys = map[string]bool{
+	"updated":                 true,
+	"locked":                  true,
+	"tempWeight":              true,
+	"tempRestingHR":           true,
+	"sportInfo":               true,
+	"atlLoad":                 true,
+	"ctlLoad":                 true,
+	"menstrualPhasePredicted": true,
+}
+
+var wellnessKnownKeys = jsonFieldNames(Wellness{})
+
+// UnmarshalJSON decodes the modeled wellness fields and keeps any remaining
+// non-null keys (custom wellness fields, future built-ins) in Extra.
+func (w *Wellness) UnmarshalJSON(data []byte) error {
+	type wellnessAlias Wellness
+	var alias wellnessAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for key, value := range raw {
+		if wellnessKnownKeys[key] || wellnessNoiseKeys[key] || string(value) == "null" {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal(value, &decoded); err != nil {
+			continue
+		}
+		if alias.Extra == nil {
+			alias.Extra = map[string]any{}
+		}
+		alias.Extra[key] = decoded
+	}
+	*w = Wellness(alias)
+	return nil
+}
+
+// jsonFieldNames collects the JSON keys of a struct's tagged fields.
+func jsonFieldNames(value any) map[string]bool {
+	names := map[string]bool{}
+	t := reflect.TypeOf(value)
+	for field := range t.Fields() {
+		tag := field.Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name != "" && name != "-" {
+			names[name] = true
+		}
+	}
+	return names
 }
 
 type Summary struct {

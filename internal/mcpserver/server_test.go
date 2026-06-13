@@ -40,6 +40,10 @@ func (f *fakeIntervals) GetWellness(context.Context, string) (*intervals.Wellnes
 	return nil, nil
 }
 
+func (f *fakeIntervals) ListWellness(context.Context, string, string) ([]intervals.Wellness, error) {
+	return nil, nil
+}
+
 func (f *fakeIntervals) GetAthleteSummary(context.Context, string, string) ([]intervals.Summary, error) {
 	return nil, nil
 }

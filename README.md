@@ -47,6 +47,7 @@ The MCP server exposes these tools:
 | `list_recent_activities` | Recent Intervals.icu activities in descending date order. |
 | `get_activity` | One activity by id, optionally including interval data. |
 | `get_recovery` | Wellness and fitness summary data for a date. |
+| `list_wellness` | Daily wellness records for a date range, including custom wellness fields. |
 | `list_calendar` | Planned workouts, notes, and other calendar events. |
 | `search` | Search recent activities, today's recovery, and upcoming planned events. |
 | `fetch` | Fetch a record returned by `search`, such as an activity, recovery date, or calendar event. |
@@ -62,7 +63,10 @@ Under the hood this currently reads only these Intervals.icu areas:
   summary, and optional interval records;
 - wellness/recovery records: CTL/ATL, ramp rate, weight, resting HR, HRV,
   calories consumed, sleep, soreness, fatigue, stress, mood, motivation,
-  hydration, readiness, comments, and macros;
+  hydration, readiness, steps, SpO2, respiration, VO2 max, blood pressure,
+  comments, macros, and custom wellness fields (for example Garmin stress or
+  Body Battery when those keys are enabled in Intervals.icu Garmin settings);
+  wellness data is daily — Intervals.icu does not store intraday values;
 - calendar events: planned workouts, notes, dates, duration/distance/load
   targets, intensity, carbs, indoor flag, and tags.
 
@@ -120,6 +124,7 @@ Use intervals to summarize today's training context.
 Use intervals to list my last 10 activities.
 Use intervals to search for threshold rides.
 Use intervals to show my planned workouts this week.
+Use intervals to plot my stress, HRV, and sleep over the last month.
 Fetch the first activity from that search and include intervals.
 ```
 
@@ -130,6 +135,7 @@ Example tool inputs, for clients that show or support direct MCP tool calls:
 {"tool": "list_recent_activities", "arguments": {"oldest": "2026-05-01", "newest": "2026-06-02", "limit": 10}}
 {"tool": "get_activity", "arguments": {"id": "ACTIVITY_ID", "include_intervals": true}}
 {"tool": "get_recovery", "arguments": {"date": "2026-06-02"}}
+{"tool": "list_wellness", "arguments": {"oldest": "2026-05-05", "newest": "2026-06-02"}}
 {"tool": "list_calendar", "arguments": {"oldest": "2026-06-02", "newest": "2026-06-09", "categories": ["WORKOUT"]}}
 {"tool": "search", "arguments": {"query": "threshold"}}
 {"tool": "fetch", "arguments": {"id": "activity:ACTIVITY_ID"}}
@@ -157,6 +163,7 @@ intervals today
 intervals activities --oldest 2026-05-01 --newest 2026-06-02 --limit 10
 intervals activity <id> --intervals --json
 intervals recovery --date 2026-06-02
+intervals wellness --oldest 2026-05-05 --newest 2026-06-02
 intervals calendar --category WORKOUT
 intervals search ride
 intervals explore

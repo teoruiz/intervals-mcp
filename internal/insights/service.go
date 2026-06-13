@@ -17,6 +17,7 @@ type IntervalsClient interface {
 	GetActivity(context.Context, string, bool) (*intervals.Activity, error)
 	GetActivityStreams(context.Context, string, []string) ([]intervals.ActivityStream, error)
 	GetWellness(context.Context, string) (*intervals.Wellness, error)
+	ListWellness(context.Context, string, string) ([]intervals.Wellness, error)
 	GetAthleteSummary(context.Context, string, string) ([]intervals.Summary, error)
 	ListEvents(context.Context, string, string, []string, int) ([]intervals.Event, error)
 	GetEvent(context.Context, int) (*intervals.Event, error)
@@ -132,6 +133,32 @@ func (s *Service) Recovery(ctx context.Context, args RecoveryArgs) (RecoveryCont
 		Summary:  summary,
 		Notes:    availabilityNotes(recovery, summary, nil, nil),
 	}, nil
+}
+
+func (s *Service) WellnessRange(ctx context.Context, args WellnessRangeArgs) (WellnessRangeContext, error) {
+	_, today, _ := s.resolveDate(ctx, "")
+	newest := args.Newest
+	if newest == "" {
+		newest = today
+	}
+	oldest := args.Oldest
+	if oldest == "" {
+		t, err := time.Parse(time.DateOnly, newest)
+		if err == nil {
+			oldest = t.AddDate(0, 0, -28).Format(time.DateOnly)
+		} else {
+			oldest = newest
+		}
+	}
+	records, err := s.client.ListWellness(ctx, oldest, newest)
+	if err != nil {
+		return WellnessRangeContext{}, fmt.Errorf("list wellness: %w", err)
+	}
+	var notes []string
+	if len(records) == 0 {
+		notes = append(notes, "No wellness records were found for this date range.")
+	}
+	return WellnessRangeContext{Oldest: oldest, Newest: newest, Records: records, Notes: notes}, nil
 }
 
 func (s *Service) Calendar(ctx context.Context, args CalendarArgs) (CalendarContext, error) {

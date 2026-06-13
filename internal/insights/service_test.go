@@ -48,6 +48,46 @@ func TestTodayContextCombinesData(t *testing.T) {
 	}
 }
 
+func TestWellnessRangeDefaultsToFourWeeks(t *testing.T) {
+	stress := 2
+	client := &fakeIntervals{
+		athlete:         &intervals.Athlete{ID: "i123", Timezone: "UTC"},
+		wellnessRecords: []intervals.Wellness{{ID: "2026-06-01", Stress: &stress}},
+	}
+	service := New(client)
+	service.now = func() time.Time { return time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC) }
+
+	got, err := service.WellnessRange(context.Background(), WellnessRangeArgs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.wellnessOldest != "2026-05-15" || client.wellnessNewest != "2026-06-12" {
+		t.Fatalf("range = %q to %q", client.wellnessOldest, client.wellnessNewest)
+	}
+	if len(got.Records) != 1 || got.Records[0].Stress == nil || *got.Records[0].Stress != 2 {
+		t.Fatalf("Records = %#v", got.Records)
+	}
+	if len(got.Notes) != 0 {
+		t.Fatalf("Notes = %#v", got.Notes)
+	}
+}
+
+func TestWellnessRangeNotesEmptyResult(t *testing.T) {
+	client := &fakeIntervals{athlete: &intervals.Athlete{ID: "i123", Timezone: "UTC"}}
+	service := New(client)
+
+	got, err := service.WellnessRange(context.Background(), WellnessRangeArgs{Oldest: "2026-06-01", Newest: "2026-06-07"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.wellnessOldest != "2026-06-01" || client.wellnessNewest != "2026-06-07" {
+		t.Fatalf("range = %q to %q", client.wellnessOldest, client.wellnessNewest)
+	}
+	if len(got.Notes) != 1 {
+		t.Fatalf("Notes = %#v, want one empty-result note", got.Notes)
+	}
+}
+
 func TestActivityWithRunningDynamics(t *testing.T) {
 	client := &fakeIntervals{
 		activity: &intervals.Activity{ID: "a1", Type: "Run"},
@@ -226,6 +266,9 @@ type fakeIntervals struct {
 	streamsCalled    bool
 	includeIntervals bool
 	wellness         *intervals.Wellness
+	wellnessRecords  []intervals.Wellness
+	wellnessOldest   string
+	wellnessNewest   string
 	summaries        []intervals.Summary
 	events           []intervals.Event
 }
@@ -253,6 +296,12 @@ func (f *fakeIntervals) GetActivityStreams(context.Context, string, []string) ([
 
 func (f *fakeIntervals) GetWellness(context.Context, string) (*intervals.Wellness, error) {
 	return f.wellness, nil
+}
+
+func (f *fakeIntervals) ListWellness(_ context.Context, oldest, newest string) ([]intervals.Wellness, error) {
+	f.wellnessOldest = oldest
+	f.wellnessNewest = newest
+	return f.wellnessRecords, nil
 }
 
 func (f *fakeIntervals) GetAthleteSummary(context.Context, string, string) ([]intervals.Summary, error) {

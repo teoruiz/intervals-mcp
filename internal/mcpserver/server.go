@@ -44,6 +44,13 @@ func New(service *insights.Service) *mcp.Server {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_wellness",
+		Description: "List daily wellness records for a date range: stress, HRV, resting HR, sleep, steps, SpO2, respiration, readiness, and any custom wellness fields (for example Garmin stress or Body Battery) under extra_fields. Records are daily; Intervals.icu does not store intraday wellness data.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args insights.WellnessRangeArgs) (*mcp.CallToolResult, insights.WellnessRangeContext, error) {
+		return toolResult(service.WellnessRange(ctx, args))
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_calendar",
 		Description: "List planned workouts, notes, and other calendar events.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args insights.CalendarArgs) (*mcp.CallToolResult, insights.CalendarContext, error) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -24,6 +25,7 @@ type Service interface {
 	RecentActivities(context.Context, insights.RecentActivitiesArgs) (insights.ActivitiesContext, error)
 	Activity(context.Context, insights.ActivityArgs) (*insights.ActivityDetail, error)
 	Recovery(context.Context, insights.RecoveryArgs) (insights.RecoveryContext, error)
+	WellnessRange(context.Context, insights.WellnessRangeArgs) (insights.WellnessRangeContext, error)
 	Calendar(context.Context, insights.CalendarArgs) (insights.CalendarContext, error)
 	Search(context.Context, insights.SearchArgs) (insights.SearchResult, error)
 }
@@ -120,7 +122,7 @@ func NeedsService(args []string) bool {
 	switch args[0] {
 	case "help", "--help", "-h":
 		return false
-	case "today", "activities", "activity", "recovery", "calendar", "search", "explore":
+	case "today", "activities", "activity", "recovery", "wellness", "calendar", "search", "explore":
 		return !helpRequested(args[1:])
 	default:
 		return false
@@ -146,6 +148,8 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return a.runActivity(ctx, commandArgs)
 	case "recovery":
 		return a.runRecovery(ctx, commandArgs)
+	case "wellness":
+		return a.runWellness(ctx, commandArgs)
 	case "calendar":
 		return a.runCalendar(ctx, commandArgs)
 	case "search":
@@ -314,6 +318,43 @@ func (a *App) runRecovery(ctx context.Context, args []string) error {
 	return nil
 }
 
+func (a *App) runWellness(ctx context.Context, args []string) error {
+	if helpRequested(args) {
+		_, err := io.WriteString(a.out, CommandUsage(a.name, "wellness"))
+		return err
+	}
+	fs := newFlagSet("wellness")
+	oldest := fs.String("oldest", "", "local start date in YYYY-MM-DD format")
+	newest := fs.String("newest", "", "local end date in YYYY-MM-DD format")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("wellness does not accept positional arguments")
+	}
+	if err := validateDateFlag("oldest", *oldest); err != nil {
+		return err
+	}
+	if err := validateDateFlag("newest", *newest); err != nil {
+		return err
+	}
+	if err := a.requireService(); err != nil {
+		return err
+	}
+	result, err := a.service.WellnessRange(ctx, insights.WellnessRangeArgs{
+		Oldest: *oldest,
+		Newest: *newest,
+	})
+	if err != nil {
+		return err
+	}
+	if a.json {
+		return writeJSON(a.out, result)
+	}
+	writeWellness(a.out, result, a.style)
+	return nil
+}
+
 func (a *App) runCalendar(ctx context.Context, args []string) error {
 	if helpRequested(args) {
 		_, err := io.WriteString(a.out, CommandUsage(a.name, "calendar"))
@@ -399,6 +440,7 @@ func (a *App) runExplore(ctx context.Context, args []string) error {
 					huh.NewOption("Today", "today"),
 					huh.NewOption("Activities", "activities"),
 					huh.NewOption("Recovery", "recovery"),
+					huh.NewOption("Wellness", "wellness"),
 					huh.NewOption("Calendar", "calendar"),
 					huh.NewOption("Search", "search"),
 				).
@@ -415,6 +457,8 @@ func (a *App) runExplore(ctx context.Context, args []string) error {
 		return a.exploreActivities(ctx)
 	case "recovery":
 		return a.exploreRecovery(ctx)
+	case "wellness":
+		return a.exploreWellness(ctx)
 	case "calendar":
 		return a.exploreCalendar(ctx)
 	case "search":
@@ -450,6 +494,20 @@ func (a *App) exploreRecovery(ctx context.Context) error {
 	}
 	args := appendFlag(nil, "--date", date)
 	return a.runRecovery(ctx, args)
+}
+
+func (a *App) exploreWellness(ctx context.Context) error {
+	var oldest, newest string
+	if err := a.form(huh.NewGroup(
+		huh.NewInput().Title("Oldest date").Placeholder("YYYY-MM-DD").Value(&oldest),
+		huh.NewInput().Title("Newest date").Placeholder("YYYY-MM-DD").Value(&newest),
+	)).RunWithContext(ctx); err != nil {
+		return err
+	}
+	args := []string{}
+	args = appendFlag(args, "--oldest", oldest)
+	args = appendFlag(args, "--newest", newest)
+	return a.runWellness(ctx, args)
 }
 
 func (a *App) exploreCalendar(ctx context.Context) error {
@@ -717,6 +775,15 @@ func writeRecovery(w io.Writer, ctx insights.RecoveryContext, style bool) {
 		writef(w, "Sleep: %s\n", secondsPtr(ctx.Recovery.SleepSecs))
 		writef(w, "Sleep score: %s\n", floatPtr(ctx.Recovery.SleepScore))
 		writef(w, "Kcal consumed: %s\n", intPtr(ctx.Recovery.KcalConsumed))
+		if ctx.Recovery.Stress != nil {
+			writef(w, "Stress: %s\n", intPtr(ctx.Recovery.Stress))
+		}
+		if ctx.Recovery.Steps != nil {
+			writef(w, "Steps: %s\n", intPtr(ctx.Recovery.Steps))
+		}
+		if len(ctx.Recovery.Extra) > 0 {
+			writef(w, "Extra fields: %s\n", extraFieldsLine(ctx.Recovery.Extra))
+		}
 	}
 	if ctx.Summary != nil {
 		writef(w, "Fitness: %s, fatigue: %s, form: %s, load: %s\n",
@@ -727,6 +794,50 @@ func writeRecovery(w io.Writer, ctx insights.RecoveryContext, style bool) {
 		)
 	}
 	writeNotes(w, ctx.Notes)
+}
+
+func writeWellness(w io.Writer, ctx insights.WellnessRangeContext, style bool) {
+	writeLine(w, title("Wellness "+ctx.Oldest+" to "+ctx.Newest, style))
+	if len(ctx.Records) == 0 {
+		writeLine(w, "No wellness records found.")
+		writeNotes(w, ctx.Notes)
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	writeLine(tw, "DATE\tREADY\tHRV\tRHR\tSLEEP\tSCORE\tSTRESS\tSTEPS\tEXTRA")
+	for _, record := range ctx.Records {
+		writef(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			record.ID,
+			floatPtr(record.Readiness),
+			floatPtr(record.HRV),
+			intPtr(record.RestingHR),
+			secondsPtr(record.SleepSecs),
+			floatPtr(record.SleepScore),
+			intPtr(record.Stress),
+			intPtr(record.Steps),
+			fallback(extraFieldsLine(record.Extra), "-"),
+		)
+	}
+	_ = tw.Flush()
+	writeNotes(w, ctx.Notes)
+}
+
+// extraFieldsLine flattens custom wellness fields into "key=value" pairs in
+// sorted key order so table output is stable.
+func extraFieldsLine(extra map[string]any) string {
+	if len(extra) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(extra))
+	for key := range extra {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", key, extra[key]))
+	}
+	return strings.Join(parts, " ")
 }
 
 func writeCalendar(w io.Writer, ctx insights.CalendarContext, style bool) {
@@ -891,6 +1002,7 @@ func Usage(name string) string {
   %[1]s [--env PATH] [--json] activities [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--limit N]
   %[1]s [--env PATH] [--json] activity <id> [--intervals] [--running-dynamics]
   %[1]s [--env PATH] [--json] recovery [--date YYYY-MM-DD]
+  %[1]s [--env PATH] [--json] wellness [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD]
   %[1]s [--env PATH] [--json] calendar [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--category WORKOUT]
   %[1]s [--env PATH] [--json] search [query]
   %[1]s [--env PATH] [--json] explore
@@ -906,6 +1018,7 @@ Commands:
   activities  List recent activities.
   activity    Show one activity by id.
   recovery    Show wellness and summary for a date.
+  wellness    List daily wellness records for a date range.
   calendar    List planned events.
   search      Search recent activities, today's recovery, and upcoming events.
   explore     Pick a command interactively.
@@ -925,6 +1038,8 @@ func CommandUsage(name, command string) string {
 		return fmt.Sprintf("Usage: %s [--env PATH] [--json] activity <id> [--intervals] [--running-dynamics]\n", name)
 	case "recovery":
 		return fmt.Sprintf("Usage: %s [--env PATH] [--json] recovery [--date YYYY-MM-DD]\n", name)
+	case "wellness":
+		return fmt.Sprintf("Usage: %s [--env PATH] [--json] wellness [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD]\n", name)
 	case "calendar":
 		return fmt.Sprintf("Usage: %s [--env PATH] [--json] calendar [--oldest YYYY-MM-DD] [--newest YYYY-MM-DD] [--category WORKOUT]\n", name)
 	case "search":

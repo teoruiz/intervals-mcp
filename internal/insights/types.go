@@ -30,6 +30,11 @@ type RecoveryArgs struct {
 	Date string `json:"date,omitempty" jsonschema:"Optional local date in YYYY-MM-DD format. Defaults to today in the athlete timezone."`
 }
 
+type WellnessRangeArgs struct {
+	Oldest string `json:"oldest,omitempty" jsonschema:"Optional local start date in YYYY-MM-DD format. Defaults to 28 days before newest."`
+	Newest string `json:"newest,omitempty" jsonschema:"Optional local end date in YYYY-MM-DD format, inclusive. Defaults to today in the athlete timezone."`
+}
+
 type CalendarArgs struct {
 	Oldest     string   `json:"oldest,omitempty" jsonschema:"Optional local start date. Defaults to today."`
 	Newest     string   `json:"newest,omitempty" jsonschema:"Optional local end date. Defaults to seven days from oldest."`
@@ -75,6 +80,13 @@ type RecoveryContext struct {
 	Recovery *intervals.Wellness `json:"recovery,omitempty"`
 	Summary  *intervals.Summary  `json:"summary,omitempty"`
 	Notes    []string            `json:"notes,omitempty"`
+}
+
+type WellnessRangeContext struct {
+	Oldest  string               `json:"oldest"`
+	Newest  string               `json:"newest"`
+	Records []intervals.Wellness `json:"records"`
+	Notes   []string             `json:"notes,omitempty"`
 }
 
 type CalendarContext struct {

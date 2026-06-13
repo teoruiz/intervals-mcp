@@ -236,6 +236,43 @@ func TestSearchJoinsQueryWords(t *testing.T) {
 	}
 }
 
+func TestWellnessPassesRangeAndPrintsExtras(t *testing.T) {
+	stress := 2
+	service := &fakeService{wellness: insights.WellnessRangeContext{
+		Oldest: "2026-06-01",
+		Newest: "2026-06-07",
+		Records: []intervals.Wellness{{
+			ID:     "2026-06-01",
+			Stress: &stress,
+			Extra:  map[string]any{"BodyBatteryMax": float64(82)},
+		}},
+	}}
+	var out bytes.Buffer
+	app := New(service, Options{NoStyle: true, Out: &out})
+
+	err := app.Run(context.Background(), []string{
+		"wellness", "--oldest", "2026-06-01", "--newest", "2026-06-07",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.wellnessArgs.Oldest != "2026-06-01" || service.wellnessArgs.Newest != "2026-06-07" {
+		t.Fatalf("args = %#v", service.wellnessArgs)
+	}
+	if !strings.Contains(out.String(), "BodyBatteryMax=82") {
+		t.Fatalf("output missing extra fields:\n%s", out.String())
+	}
+}
+
+func TestWellnessRejectsInvalidDate(t *testing.T) {
+	service := &fakeService{}
+	app := New(service, Options{NoStyle: true, Out: ioDiscard{}})
+
+	if err := app.Run(context.Background(), []string{"wellness", "--oldest", "2026/06/01"}); err == nil {
+		t.Fatal("Run() succeeded with invalid date")
+	}
+}
+
 func TestRecoveryRejectsInvalidDate(t *testing.T) {
 	service := &fakeService{}
 	app := New(service, Options{NoStyle: true, Out: ioDiscard{}})
@@ -250,6 +287,7 @@ type fakeService struct {
 	activities insights.ActivitiesContext
 	activity   *insights.ActivityDetail
 	recovery   insights.RecoveryContext
+	wellness   insights.WellnessRangeContext
 	calendar   insights.CalendarContext
 	search     insights.SearchResult
 
@@ -257,6 +295,7 @@ type fakeService struct {
 	recentArgs   insights.RecentActivitiesArgs
 	activityArgs insights.ActivityArgs
 	recoveryArgs insights.RecoveryArgs
+	wellnessArgs insights.WellnessRangeArgs
 	calendarArgs insights.CalendarArgs
 	searchArgs   insights.SearchArgs
 }
@@ -279,6 +318,11 @@ func (f *fakeService) Activity(_ context.Context, args insights.ActivityArgs) (*
 func (f *fakeService) Recovery(_ context.Context, args insights.RecoveryArgs) (insights.RecoveryContext, error) {
 	f.recoveryArgs = args
 	return f.recovery, nil
+}
+
+func (f *fakeService) WellnessRange(_ context.Context, args insights.WellnessRangeArgs) (insights.WellnessRangeContext, error) {
+	f.wellnessArgs = args
+	return f.wellness, nil
 }
 
 func (f *fakeService) Calendar(_ context.Context, args insights.CalendarArgs) (insights.CalendarContext, error) {

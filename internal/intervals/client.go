@@ -162,6 +162,19 @@ func (c *Client) GetWellness(ctx context.Context, date string) (*Wellness, error
 	return &wellness, nil
 }
 
+// ListWellness fetches the daily wellness records between oldest and newest,
+// both inclusive local ISO-8601 dates. Days without a record are omitted.
+func (c *Client) ListWellness(ctx context.Context, oldest, newest string) ([]Wellness, error) {
+	values := url.Values{}
+	values.Set("oldest", oldest)
+	values.Set("newest", newest)
+	var records []Wellness
+	if err := c.get(ctx, c.athletePath("wellness"), values, &records); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 func (c *Client) GetAthleteSummary(ctx context.Context, start, end string) ([]Summary, error) {
 	values := url.Values{}
 	if start != "" {

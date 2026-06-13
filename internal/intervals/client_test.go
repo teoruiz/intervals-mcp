@@ -84,6 +84,57 @@ func TestGetActivityStreamsRequest(t *testing.T) {
 	}
 }
 
+func TestListWellnessRequest(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/v1/athlete/i123/wellness" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("oldest"); got != "2026-06-01" {
+			t.Fatalf("oldest = %q", got)
+		}
+		if got := r.URL.Query().Get("newest"); got != "2026-06-07" {
+			t.Fatalf("newest = %q", got)
+		}
+		return jsonResponse(200, `[
+			{"id":"2026-06-01","stress":2,"hrv":68.0,"restingHR":47,"steps":9904,"updated":"2026-06-01T22:00:00Z","sportInfo":[],"BodyBatteryMax":82,"AvgStress":31,"vo2max":null},
+			{"id":"2026-06-02","sleepScore":74.0}
+		]`), nil
+	})}
+
+	client, err := NewClient(Config{BaseURL: "https://intervals.test", APIKey: "secret", AthleteID: "i123", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := client.ListWellness(context.Background(), "2026-06-01", "2026-06-07")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || records[0].ID != "2026-06-01" {
+		t.Fatalf("records = %#v", records)
+	}
+	first := records[0]
+	if first.Stress == nil || *first.Stress != 2 {
+		t.Fatalf("Stress = %v, want 2", first.Stress)
+	}
+	if first.Steps == nil || *first.Steps != 9904 {
+		t.Fatalf("Steps = %v, want 9904", first.Steps)
+	}
+	if got := first.Extra["BodyBatteryMax"]; got != float64(82) {
+		t.Fatalf("Extra[BodyBatteryMax] = %v, want 82", got)
+	}
+	if got := first.Extra["AvgStress"]; got != float64(31) {
+		t.Fatalf("Extra[AvgStress] = %v, want 31", got)
+	}
+	for _, noise := range []string{"updated", "sportInfo", "vo2max"} {
+		if _, ok := first.Extra[noise]; ok {
+			t.Fatalf("Extra unexpectedly contains %q: %#v", noise, first.Extra)
+		}
+	}
+	if records[1].Extra != nil {
+		t.Fatalf("Extra = %#v, want nil when no custom fields", records[1].Extra)
+	}
+}
+
 func TestNotFoundMapsToNilWellness(t *testing.T) {
 	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return jsonResponse(404, `not found`), nil
