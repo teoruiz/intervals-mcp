@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
@@ -20,6 +21,49 @@ import (
 // each one pays a round trip for a value that almost never changes. The TTL is
 // short because `intervals mcp stdio` can run for days on a laptop.
 const defaultAthleteCacheTTL = 10 * time.Minute
+
+const (
+	// Intervals.icu allows 10 calls per second per IP on top of its 15 minute
+	// and daily budgets. That per-second ceiling returns no headers, so the
+	// only defence is not exceeding it: cap how many calls are ever in flight.
+	// The egress IP belongs to the container platform, not to us.
+	defaultMaxConcurrentRequests = 4
+
+	// Only a short Retry-After is worth waiting out inside a request. A small
+	// value means the per-second limit. The 15 minute and daily buckets report
+	// values far beyond any sane request timeout, so those fail fast instead.
+	maxRateLimitAttempts = 3
+	maxRateLimitSleep    = 2 * time.Second
+
+	// Warn once the remaining budget falls below this share of the limit.
+	rateLimitWarnFraction = 0.1
+)
+
+// RateLimitError reports a 429 from Intervals.icu together with the wait it
+// asked for, so a tool can tell the caller when to come back instead of
+// surfacing an opaque status code.
+type RateLimitError struct {
+	RetryAfter time.Duration
+	Body       string
+}
+
+func (e *RateLimitError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("intervals API rate limited, retry after %s", e.RetryAfter)
+	}
+	return "intervals API rate limited"
+}
+
+// RateLimit is the budget Intervals.icu reports on every response, as
+// "X-RateLimit-Limit: <15m>,<daily>" and the matching Remaining header. The
+// per-second IP limit is not reported and is absent here.
+type RateLimit struct {
+	Observed               bool
+	FifteenMinuteLimit     int
+	FifteenMinuteRemaining int
+	DailyLimit             int
+	DailyRemaining         int
+}
 
 var ErrNotFound = errors.New("intervals resource not found")
 
@@ -36,6 +80,13 @@ type Client struct {
 	athleteMu        sync.Mutex
 	athlete          *Athlete
 	athleteFetchedAt time.Time
+
+	// sem caps calls in flight. nil means unlimited.
+	sem    chan struct{}
+	logger *slog.Logger
+
+	rateMu    sync.Mutex
+	rateLimit RateLimit
 }
 
 type Config struct {
@@ -51,6 +102,14 @@ type Config struct {
 
 	// Now overrides the clock used to expire the athlete cache, for tests.
 	Now func() time.Time
+
+	// MaxConcurrentRequests caps how many calls are in flight at once. Zero
+	// selects defaultMaxConcurrentRequests; a negative value removes the cap.
+	MaxConcurrentRequests int
+
+	// Logger, when set, reports the rate limit budget: once when first seen,
+	// and again whenever the remaining allowance runs low.
+	Logger *slog.Logger
 }
 
 type APIError struct {
@@ -92,6 +151,14 @@ func NewClient(cfg Config) (*Client, error) {
 	if now == nil {
 		now = time.Now
 	}
+	concurrency := cfg.MaxConcurrentRequests
+	if concurrency == 0 {
+		concurrency = defaultMaxConcurrentRequests
+	}
+	var sem chan struct{}
+	if concurrency > 0 {
+		sem = make(chan struct{}, concurrency)
+	}
 	return &Client{
 		baseURL:    baseURL,
 		apiKey:     cfg.APIKey,
@@ -100,7 +167,16 @@ func NewClient(cfg Config) (*Client, error) {
 		timeout:    timeout,
 		athleteTTL: athleteTTL,
 		now:        now,
+		sem:        sem,
+		logger:     cfg.Logger,
 	}, nil
+}
+
+// RateLimit returns the most recent budget reported by Intervals.icu.
+func (c *Client) RateLimit() RateLimit {
+	c.rateMu.Lock()
+	defer c.rateMu.Unlock()
+	return c.rateLimit
 }
 
 func (c *Client) AthleteID() string {
@@ -278,6 +354,8 @@ func (c *Client) GetEvent(ctx context.Context, id int) (*Event, error) {
 	return &event, nil
 }
 
+// get issues the request, retrying only a short rate limit wait. The whole
+// call, retries included, stays inside the configured request timeout.
 func (c *Client) get(ctx context.Context, apiPath string, values url.Values, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -285,8 +363,42 @@ func (c *Client) get(ctx context.Context, apiPath string, values url.Values, out
 	u := *c.baseURL
 	u.Path = path.Join(c.baseURL.Path, apiPath)
 	u.RawQuery = values.Encode()
+	target := u.String()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	for attempt := 1; ; attempt++ {
+		err := c.doGet(ctx, target, out)
+
+		var limited *RateLimitError
+		if !errors.As(err, &limited) {
+			return err
+		}
+		// A long Retry-After is the 15 minute or daily bucket. Waiting it out
+		// would blow the request timeout, so report it and let the caller
+		// decide when to come back.
+		if attempt >= maxRateLimitAttempts || limited.RetryAfter > maxRateLimitSleep {
+			return err
+		}
+		wait := limited.RetryAfter
+		if wait <= 0 {
+			wait = time.Second
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return err
+		}
+	}
+}
+
+func (c *Client) doGet(ctx context.Context, target string, out any) error {
+	if err := c.acquire(ctx); err != nil {
+		return err
+	}
+	defer c.release()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -302,6 +414,15 @@ func (c *Client) get(ctx context.Context, apiPath string, values url.Values, out
 		_ = res.Body.Close()
 	}()
 
+	c.recordRateLimit(res.Header)
+
+	if res.StatusCode == http.StatusTooManyRequests {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 8192))
+		return &RateLimitError{
+			RetryAfter: parseRetryAfter(res.Header.Get("Retry-After"), c.now()),
+			Body:       strings.TrimSpace(string(body)),
+		}
+	}
 	if res.StatusCode == http.StatusNotFound {
 		_, _ = io.Copy(io.Discard, res.Body)
 		return ErrNotFound
@@ -314,6 +435,112 @@ func (c *Client) get(ctx context.Context, apiPath string, values url.Values, out
 		return fmt.Errorf("decode intervals response: %w", err)
 	}
 	return nil
+}
+
+// acquire blocks until a request slot is free or ctx ends.
+func (c *Client) acquire(ctx context.Context) error {
+	if c.sem == nil {
+		return nil
+	}
+	select {
+	case c.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("intervals request queued: %w", ctx.Err())
+	}
+}
+
+func (c *Client) release() {
+	if c.sem != nil {
+		<-c.sem
+	}
+}
+
+// recordRateLimit stores the reported budget and reports it: once when first
+// seen, so the actual allowance is discoverable, and again whenever what is
+// left runs low.
+func (c *Client) recordRateLimit(header http.Header) {
+	limit, okLimit := parseRateLimitPair(header.Get("X-RateLimit-Limit"))
+	remaining, okRemaining := parseRateLimitPair(header.Get("X-RateLimit-Remaining"))
+	if !okLimit || !okRemaining {
+		return
+	}
+	observed := RateLimit{
+		Observed:               true,
+		FifteenMinuteLimit:     limit[0],
+		FifteenMinuteRemaining: remaining[0],
+		DailyLimit:             limit[1],
+		DailyRemaining:         remaining[1],
+	}
+
+	c.rateMu.Lock()
+	first := !c.rateLimit.Observed
+	c.rateLimit = observed
+	c.rateMu.Unlock()
+
+	if c.logger == nil {
+		return
+	}
+	attrs := []any{
+		"window_remaining", observed.FifteenMinuteRemaining,
+		"window_limit", observed.FifteenMinuteLimit,
+		"daily_remaining", observed.DailyRemaining,
+		"daily_limit", observed.DailyLimit,
+	}
+	if isLowBudget(observed) {
+		c.logger.Warn("intervals API rate limit budget running low", attrs...)
+		return
+	}
+	if first {
+		c.logger.Info("intervals API rate limit budget", attrs...)
+	}
+}
+
+func isLowBudget(limit RateLimit) bool {
+	low := func(remaining, total int) bool {
+		return total > 0 && float64(remaining) < float64(total)*rateLimitWarnFraction
+	}
+	return low(limit.FifteenMinuteRemaining, limit.FifteenMinuteLimit) ||
+		low(limit.DailyRemaining, limit.DailyLimit)
+}
+
+// parseRateLimitPair reads the "<15m>,<daily>" header shape.
+func parseRateLimitPair(value string) ([2]int, bool) {
+	var pair [2]int
+	first, second, found := strings.Cut(strings.TrimSpace(value), ",")
+	if !found {
+		return pair, false
+	}
+	window, err := strconv.Atoi(strings.TrimSpace(first))
+	if err != nil {
+		return pair, false
+	}
+	daily, err := strconv.Atoi(strings.TrimSpace(second))
+	if err != nil {
+		return pair, false
+	}
+	return [2]int{window, daily}, true
+}
+
+// parseRetryAfter accepts the documented delay in seconds and also the HTTP
+// date form, which the spec permits.
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds < 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		if wait := when.Sub(now); wait > 0 {
+			return wait
+		}
+	}
+	return 0
 }
 
 func (c *Client) athletePath(parts ...string) string {

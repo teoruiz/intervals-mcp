@@ -90,7 +90,7 @@ func serve(logger *slog.Logger, opts options) error {
 	}
 
 	httpClient := &http.Client{Timeout: cfg.RequestTimeout}
-	mcpHandler, err := buildMCPHandler(cfg, httpClient)
+	mcpHandler, err := buildMCPHandler(cfg, httpClient, appruntime.WithLogger(logger))
 	if err != nil {
 		return err
 	}
@@ -116,8 +116,8 @@ func serve(logger *slog.Logger, opts options) error {
 	return runHTTPServer(server, cfg.ShutdownTimeout)
 }
 
-func buildMCPHandler(cfg config.Config, httpClient *http.Client) (http.Handler, error) {
-	return appruntime.NewMCPHTTPHandler(cfg, httpClient)
+func buildMCPHandler(cfg config.Config, httpClient *http.Client, opts ...appruntime.Option) (http.Handler, error) {
+	return appruntime.NewMCPHTTPHandler(cfg, httpClient, opts...)
 }
 
 func runHTTPServer(server *http.Server, shutdownTimeout time.Duration) error {
