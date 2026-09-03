@@ -21,7 +21,6 @@ func TestRunConfigShowRedactsSecrets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDir, "config.env"), []byte(`
 INTERVALS_ICU_API_KEY=super-secret
 INTERVALS_ICU_ATHLETE_ID=i123
-SUPABASE_ANON_KEY=anon-secret
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +36,7 @@ SUPABASE_ANON_KEY=anon-secret
 		t.Fatal(err)
 	}
 	output := out.String()
-	if strings.Contains(output, "super-secret") || strings.Contains(output, "anon-secret") {
+	if strings.Contains(output, "super-secret") {
 		t.Fatalf("config show leaked secret: %s", output)
 	}
 	if !strings.Contains(output, "INTERVALS_ICU_API_KEY=REDACTED") {
@@ -91,17 +90,6 @@ func clearRunnerEnv(t *testing.T) {
 		"INTERVALS_ICU_ATHLETE_ID",
 		"INTERVALS_ICU_BASE_URL",
 		"MCP_ADDR",
-		"MCP_PUBLIC_URL",
-		"MCP_REQUIRED_SCOPE",
-		"SUPABASE_URL",
-		"SUPABASE_ANON_KEY",
-		"SUPABASE_PUBLISHABLE_KEY",
-		"SUPABASE_OAUTH_PROVIDERS",
-		"OIDC_ISSUER_URL",
-		"OIDC_JWKS_URL",
-		"OIDC_AUDIENCE",
-		"OIDC_ALLOWED_EMAIL",
-		"OIDC_ALLOWED_SUBJECT",
 		"REQUEST_TIMEOUT",
 		"SHUTDOWN_TIMEOUT",
 	} {

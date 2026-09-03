@@ -15,7 +15,6 @@ import (
 const (
 	defaultIntervalsBaseURL = "https://intervals.icu"
 	defaultMCPAddr          = ":8080"
-	defaultOIDCAudience     = "authenticated"
 	defaultRequestTimeout   = 15 * time.Second
 	defaultShutdownTimeout  = 10 * time.Second
 )
@@ -62,21 +61,10 @@ type Config struct {
 	IntervalsAthleteID string
 	IntervalsBaseURL   string
 
-	MCPAddr        string
-	MCPPublicURL   string
-	RequiredScopes []string
+	MCPAddr string
 
-	SupabaseURL            string
-	SupabaseAnonKey        string
-	SupabaseOAuthProviders []string
-
-	OIDCIssuerURL    string
-	OIDCJWKSURL      string
-	OIDCAudience     string
-	OIDCAllowedEmail string
-	OIDCAllowedSub   string
-	RequestTimeout   time.Duration
-	ShutdownTimeout  time.Duration
+	RequestTimeout  time.Duration
+	ShutdownTimeout time.Duration
 }
 
 func LoadEffective(opts DiscoveryOptions) (Config, Source, error) {
@@ -191,69 +179,21 @@ func loadFromSources(values map[string]string) Config {
 		IntervalsAthleteID: envLookup(lookup, "INTERVALS_ICU_ATHLETE_ID", ""),
 		IntervalsBaseURL:   trimTrailingSlash(envLookup(lookup, "INTERVALS_ICU_BASE_URL", defaultIntervalsBaseURL)),
 
-		MCPAddr:        envLookup(lookup, "MCP_ADDR", defaultMCPAddr),
-		MCPPublicURL:   trimTrailingSlash(envLookup(lookup, "MCP_PUBLIC_URL", "")),
-		RequiredScopes: csv(envLookup(lookup, "MCP_REQUIRED_SCOPE", "")),
+		MCPAddr: envLookup(lookup, "MCP_ADDR", defaultMCPAddr),
 
-		SupabaseURL:            trimTrailingSlash(envLookup(lookup, "SUPABASE_URL", "")),
-		SupabaseAnonKey:        firstNonEmpty(envLookup(lookup, "SUPABASE_ANON_KEY", ""), envLookup(lookup, "SUPABASE_PUBLISHABLE_KEY", "")),
-		SupabaseOAuthProviders: csv(envLookup(lookup, "SUPABASE_OAUTH_PROVIDERS", "")),
-
-		OIDCIssuerURL:    trimTrailingSlash(envLookup(lookup, "OIDC_ISSUER_URL", "")),
-		OIDCJWKSURL:      trimTrailingSlash(envLookup(lookup, "OIDC_JWKS_URL", "")),
-		OIDCAudience:     envLookup(lookup, "OIDC_AUDIENCE", defaultOIDCAudience),
-		OIDCAllowedEmail: envLookup(lookup, "OIDC_ALLOWED_EMAIL", ""),
-		OIDCAllowedSub:   envLookup(lookup, "OIDC_ALLOWED_SUBJECT", ""),
-		RequestTimeout:   durationLookup(lookup, "REQUEST_TIMEOUT", defaultRequestTimeout),
-		ShutdownTimeout:  durationLookup(lookup, "SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
-	}
-
-	if cfg.OIDCIssuerURL == "" && cfg.SupabaseURL != "" {
-		cfg.OIDCIssuerURL = cfg.SupabaseURL + "/auth/v1"
-	}
-	if cfg.OIDCJWKSURL == "" && cfg.OIDCIssuerURL != "" {
-		cfg.OIDCJWKSURL = cfg.OIDCIssuerURL + "/.well-known/jwks.json"
+		RequestTimeout:  durationLookup(lookup, "REQUEST_TIMEOUT", defaultRequestTimeout),
+		ShutdownTimeout: durationLookup(lookup, "SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
 	}
 	return cfg
 }
 
+// Validate is ValidateIntervals plus the server-only shutdown-timeout check.
+// Authentication is enforced by the Cloudflare Worker in front of the server,
+// so there is nothing else for the process to validate.
 func (c Config) Validate() error {
 	var errs []error
 	if err := c.ValidateIntervals(); err != nil {
 		errs = append(errs, err)
-	}
-	required := map[string]string{
-		"MCP_PUBLIC_URL": c.MCPPublicURL,
-		"SUPABASE_URL":   c.SupabaseURL,
-		"SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY": c.SupabaseAnonKey,
-		"OIDC_ISSUER_URL": c.OIDCIssuerURL,
-		"OIDC_JWKS_URL":   c.OIDCJWKSURL,
-		"OIDC_AUDIENCE":   c.OIDCAudience,
-	}
-	for key, value := range required {
-		if strings.TrimSpace(value) == "" {
-			errs = append(errs, fmt.Errorf("%s is required", key))
-		}
-	}
-	if c.OIDCAllowedEmail == "" && c.OIDCAllowedSub == "" {
-		errs = append(errs, errors.New("OIDC_ALLOWED_EMAIL or OIDC_ALLOWED_SUBJECT is required"))
-	}
-	for key, value := range map[string]string{
-		"INTERVALS_ICU_BASE_URL": c.IntervalsBaseURL,
-		"MCP_PUBLIC_URL":         c.MCPPublicURL,
-		"SUPABASE_URL":           c.SupabaseURL,
-		"OIDC_ISSUER_URL":        c.OIDCIssuerURL,
-		"OIDC_JWKS_URL":          c.OIDCJWKSURL,
-	} {
-		if value == "" {
-			continue
-		}
-		if _, err := url.ParseRequestURI(value); err != nil {
-			errs = append(errs, fmt.Errorf("%s must be a valid URL: %w", key, err))
-		}
-	}
-	if c.RequestTimeout <= 0 {
-		errs = append(errs, errors.New("REQUEST_TIMEOUT must be positive"))
 	}
 	if c.ShutdownTimeout <= 0 {
 		errs = append(errs, errors.New("SHUTDOWN_TIMEOUT must be positive"))
@@ -278,14 +218,6 @@ func (c Config) ValidateIntervals() error {
 		errs = append(errs, errors.New("REQUEST_TIMEOUT must be positive"))
 	}
 	return errors.Join(errs...)
-}
-
-func (c Config) MCPResource() string {
-	return c.MCPPublicURL + "/mcp"
-}
-
-func (c Config) ResourceMetadataURL() string {
-	return c.MCPPublicURL + "/.well-known/oauth-protected-resource"
 }
 
 func discoverValues(opts DiscoveryOptions) (Source, map[string]string, error) {
@@ -452,29 +384,8 @@ func fileExists(path string) (bool, error) {
 	return true, nil
 }
 
-func csv(raw string) []string {
-	var out []string
-	for part := range strings.SplitSeq(raw, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
 func trimTrailingSlash(s string) string {
 	return strings.TrimRight(strings.TrimSpace(s), "/")
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = cleanValue(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func cleanValue(value string) string {

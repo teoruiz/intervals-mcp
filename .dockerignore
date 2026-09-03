@@ -1,4 +1,3 @@
-# flyctl launch added from .gitignore
 **/.env
 **/.env.*
 !**/.env.example
@@ -12,4 +11,13 @@
 
 **/*.log
 **/*.tmp
-fly.toml
+
+docs
+worker
+node_modules
+.wrangler
+.dev.vars
+package.json
+package-lock.json
+tsconfig.json
+wrangler.jsonc

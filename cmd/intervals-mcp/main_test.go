@@ -4,11 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/teoruiz/intervals-mcp/internal/config"
 )
@@ -21,11 +19,11 @@ func TestParseFlags(t *testing.T) {
 		wantErr bool
 	}{
 		{"defaults", nil, options{}, false},
-		{"local", []string{"--local"}, options{Local: true}, false},
 		{"addr", []string{"--addr", "127.0.0.1:9000"}, options{Addr: "127.0.0.1:9000"}, false},
 		{"env", []string{"--env", "custom.env"}, options{EnvPath: "custom.env", EnvExplicit: true}, false},
-		{"combined", []string{"--local", "--addr", "0.0.0.0:8080", "--env", ".env.local"}, options{Local: true, Addr: "0.0.0.0:8080", EnvPath: ".env.local", EnvExplicit: true}, false},
+		{"combined", []string{"--addr", "0.0.0.0:8080", "--env", ".env.local"}, options{Addr: "0.0.0.0:8080", EnvPath: ".env.local", EnvExplicit: true}, false},
 		{"unknown flag", []string{"--nope"}, options{}, true},
+		{"removed local flag", []string{"--local"}, options{}, true},
 		{"positional arg", []string{"serve"}, options{}, true},
 	}
 	for _, tc := range cases {
@@ -100,9 +98,10 @@ func testConfig() config.Config {
 	}
 }
 
-// TestLocalMCPServesToolsWithoutAuth verifies that the handler used by --local
-// serves the MCP tool list over HTTP without requiring a bearer token.
-func TestLocalMCPServesToolsWithoutAuth(t *testing.T) {
+// TestMCPServesTools verifies that the handler serves the MCP tool list over
+// HTTP without requiring a bearer token. Authentication lives in the
+// Cloudflare Worker in front of this server, not here.
+func TestMCPServesTools(t *testing.T) {
 	cfg := testConfig()
 	handler, err := buildMCPHandler(cfg, &http.Client{Timeout: cfg.RequestTimeout})
 	if err != nil {
@@ -140,6 +139,7 @@ func TestLocalMCPServesToolsWithoutAuth(t *testing.T) {
 		"list_recent_activities",
 		"get_activity",
 		"get_recovery",
+		"list_wellness",
 		"list_calendar",
 		"search",
 		"fetch",
@@ -148,40 +148,5 @@ func TestLocalMCPServesToolsWithoutAuth(t *testing.T) {
 		if !got[name] {
 			t.Errorf("missing tool %q (got %v)", name, got)
 		}
-	}
-}
-
-// TestProtectedMCPRequiresBearerToken is the authenticated-path counterpart: the
-// same handler, wrapped in RequireBearerToken, rejects a tokenless request.
-func TestProtectedMCPRequiresBearerToken(t *testing.T) {
-	cfg := testConfig()
-	handler, err := buildMCPHandler(cfg, &http.Client{Timeout: cfg.RequestTimeout})
-	if err != nil {
-		t.Fatalf("buildMCPHandler: %v", err)
-	}
-
-	verify := func(context.Context, string, *http.Request) (*mcpauth.TokenInfo, error) {
-		return nil, mcpauth.ErrInvalidToken
-	}
-	protected := mcpauth.RequireBearerToken(verify, &mcpauth.RequireBearerTokenOptions{
-		ResourceMetadataURL: "https://example.test/.well-known/oauth-protected-resource",
-	})(handler)
-
-	mux := http.NewServeMux()
-	mux.Handle("POST /mcp", protected)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL+"/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
-	}
-	if resp.Header.Get("WWW-Authenticate") == "" {
-		t.Errorf("expected WWW-Authenticate header on 401 response")
 	}
 }

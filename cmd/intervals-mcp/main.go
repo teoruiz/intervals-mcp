@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,11 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
-	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"github.com/teoruiz/intervals-mcp/internal/auth"
 	"github.com/teoruiz/intervals-mcp/internal/config"
-	"github.com/teoruiz/intervals-mcp/internal/oauthui"
 	appruntime "github.com/teoruiz/intervals-mcp/internal/runtime"
 )
 
@@ -35,7 +30,6 @@ func main() {
 }
 
 type options struct {
-	Local       bool
 	Addr        string
 	EnvPath     string
 	EnvExplicit bool
@@ -43,8 +37,7 @@ type options struct {
 
 func newFlagSet(opts *options) *flag.FlagSet {
 	fs := flag.NewFlagSet("intervals-mcp", flag.ContinueOnError)
-	fs.BoolVar(&opts.Local, "local", false, "run an unauthenticated MCP server for local use (no Supabase/OIDC)")
-	fs.StringVar(&opts.Addr, "addr", "", "override the listen address (local mode defaults to "+defaultLocalAddr+", otherwise MCP_ADDR)")
+	fs.StringVar(&opts.Addr, "addr", "", "override the listen address (defaults to "+defaultLocalAddr+", or process-env MCP_ADDR)")
 	fs.StringVar(&opts.EnvPath, "env", "", "path to the dotenv file to load instead of discovered config")
 	return fs
 }
@@ -79,75 +72,13 @@ func run(logger *slog.Logger, args []string) error {
 		}
 		return err
 	}
-	if opts.Local {
-		return serveLocal(logger, opts)
-	}
-	return serveAuthenticated(logger, opts)
+	return serve(logger, opts)
 }
 
-func serveAuthenticated(logger *slog.Logger, opts options) error {
-	cfg, _, err := config.LoadDiscovered(config.DiscoveryOptions{
-		EnvPath:     opts.EnvPath,
-		EnvExplicit: opts.EnvExplicit,
-	})
-	if err != nil {
-		return err
-	}
-
-	httpClient := &http.Client{Timeout: cfg.RequestTimeout}
-	mcpHandler, err := buildMCPHandler(cfg, httpClient)
-	if err != nil {
-		return err
-	}
-
-	verifier, err := auth.NewJWTVerifier(auth.VerifierConfig{
-		IssuerURL:      cfg.OIDCIssuerURL,
-		Audience:       cfg.OIDCAudience,
-		AllowedEmail:   cfg.OIDCAllowedEmail,
-		AllowedSubject: cfg.OIDCAllowedSub,
-		JWKSURL:        cfg.OIDCJWKSURL,
-		HTTPClient:     httpClient,
-	})
-	if err != nil {
-		return err
-	}
-
-	oauthHandler, err := oauthui.New(oauthui.Config{
-		SupabaseURL:     cfg.SupabaseURL,
-		SupabaseAnonKey: cfg.SupabaseAnonKey,
-		Providers:       cfg.SupabaseOAuthProviders,
-	})
-	if err != nil {
-		return err
-	}
-
-	protectedMCP := mcpauth.RequireBearerToken(verifier.Verify, &mcpauth.RequireBearerTokenOptions{
-		ResourceMetadataURL: cfg.ResourceMetadataURL(),
-		Scopes:              cfg.RequiredScopes,
-	})(mcpHandler)
-
-	mux := http.NewServeMux()
-	mux.Handle("POST /mcp", protectedMCP)
-	mux.Handle("GET /mcp", protectedMCP)
-	mux.Handle("DELETE /mcp", protectedMCP)
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource", protectedResourceHandler(cfg))
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", protectedResourceHandler(cfg))
-	mux.Handle("GET /oauth/consent", oauthHandler)
-	mux.Handle("GET /oauth/callback", oauthHandler)
-	mux.HandleFunc("GET /healthz", healthHandler)
-	mux.HandleFunc("GET /readyz", readyHandler)
-
-	server := &http.Server{
-		Addr:              cfg.MCPAddr,
-		Handler:           loggingMiddleware(logger, securityHeaders(mux)),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	logger.Info("starting intervals MCP server", "addr", cfg.MCPAddr, "public_url", cfg.MCPPublicURL)
-	return runHTTPServer(server, cfg.ShutdownTimeout)
-}
-
-func serveLocal(logger *slog.Logger, opts options) error {
+// serve runs the MCP server without authentication. Remote deployments put it
+// behind the Cloudflare Worker, which terminates OAuth and proxies only
+// authorized traffic; locally it is meant to stay on loopback.
+func serve(logger *slog.Logger, opts options) error {
 	envAddr, envAddrSet := os.LookupEnv("MCP_ADDR")
 
 	cfg, _, err := config.LoadIntervalsDiscovered(config.DiscoveryOptions{
@@ -178,9 +109,9 @@ func serveLocal(logger *slog.Logger, opts options) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	logger.Warn("starting local intervals MCP server with authentication disabled", "addr", addr, "endpoint", "http://"+addr+"/mcp")
+	logger.Info("starting intervals MCP server", "addr", addr, "endpoint", "http://"+addr+"/mcp")
 	if !isLoopbackAddr(addr) {
-		logger.Warn("local MCP server is unauthenticated and not bound to loopback; anyone who can reach this address has full read access to the configured Intervals.icu athlete", "addr", addr)
+		logger.Info("MCP server is unauthenticated and not bound to loopback; expected inside the Cloudflare container, otherwise anyone who can reach this address has full read access to the configured Intervals.icu athlete", "addr", addr)
 	}
 	return runHTTPServer(server, cfg.ShutdownTimeout)
 }
@@ -239,23 +170,6 @@ func isLoopbackAddr(addr string) bool {
 	return false
 }
 
-func protectedResourceHandler(cfg config.Config) http.HandlerFunc {
-	metadata := oauthex.ProtectedResourceMetadata{
-		Resource:               cfg.MCPResource(),
-		AuthorizationServers:   []string{cfg.OIDCIssuerURL},
-		ScopesSupported:        cfg.RequiredScopes,
-		BearerMethodsSupported: []string{"header"},
-		ResourceName:           "Intervals.icu MCP",
-		ResourceDocumentation:  strings.TrimRight(cfg.MCPPublicURL, "/"),
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(metadata); err != nil {
-			http.Error(w, "encode metadata", http.StatusInternalServerError)
-		}
-	}
-}
-
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -286,6 +200,7 @@ func loggingMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
+			"user", r.Header.Get("X-Intervals-Authenticated-User"),
 		)
 	})
 }

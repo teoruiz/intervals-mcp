@@ -5,7 +5,7 @@ GOLANGCI_LINT_CACHE ?= /tmp/golangci-lint-cache
 PREK ?= prek
 PREK_HOME ?= /tmp/prek-cache
 
-.PHONY: fmt fmt-check fix test vet lint check run run-local hooks precommit
+.PHONY: fmt fmt-check fix test vet lint check run hooks precommit worker-install worker-test dev-worker deploy docker-build
 
 fmt:
 	gofmt -w .
@@ -40,5 +40,18 @@ precommit:
 run:
 	GOCACHE=$(GOCACHE) $(GO) run $(GOBUILDVCS) ./cmd/intervals-mcp
 
-run-local:
-	GOCACHE=$(GOCACHE) $(GO) run $(GOBUILDVCS) ./cmd/intervals-mcp --local
+worker-install:
+	npm ci
+
+worker-test:
+	npm run typecheck
+	npm run test:worker
+
+dev-worker:
+	npm run dev
+
+deploy:
+	npm run deploy
+
+docker-build:
+	docker build --platform linux/amd64 -t intervals-mcp:local .

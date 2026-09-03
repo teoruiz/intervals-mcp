@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "intervals-mcp",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-08-28",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      // Existing "OAUTH_KV" namespace on the account. To use a dedicated one:
+      //   wrangler kv namespace create OAUTH_KV_INTERVALS
+      "id": "e4f0c2fbd5934c4e98d76741f29d8ab9",
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "IntervalsContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      // "basic" = 1/4 vCPU, 1 GiB memory, 4 GB disk. Custom sizes are
+      // enterprise-only and must be at least 3 GiB per vCPU.
+      "instance_type": "basic",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "INTERVALS_CONTAINER",
+        "class_name": "IntervalsContainer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["IntervalsContainer"],
+    },
+  ],
+}

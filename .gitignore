@@ -2,7 +2,9 @@
 .env.*
 !.env.example
 
-fly.toml
+.dev.vars
+node_modules/
+.wrangler/
 
 bin/
 dist/

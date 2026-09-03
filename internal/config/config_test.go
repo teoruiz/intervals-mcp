@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 )
 
@@ -14,10 +13,7 @@ func TestLoadDotenvAndValidate(t *testing.T) {
 	body := `
 INTERVALS_ICU_API_KEY=secret
 INTERVALS_ICU_ATHLETE_ID=i123
-MCP_PUBLIC_URL=https://mcp.example.com
-SUPABASE_URL=https://project.supabase.co
-SUPABASE_ANON_KEY=anon
-OIDC_ALLOWED_EMAIL=me@example.com
+MCP_ADDR=0.0.0.0:8080
 `
 	if err := os.WriteFile(envPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -30,72 +26,11 @@ OIDC_ALLOWED_EMAIL=me@example.com
 	if cfg.IntervalsAPIKey != "secret" {
 		t.Fatalf("IntervalsAPIKey = %q", cfg.IntervalsAPIKey)
 	}
-	if cfg.OIDCIssuerURL != "https://project.supabase.co/auth/v1" {
-		t.Fatalf("OIDCIssuerURL = %q", cfg.OIDCIssuerURL)
+	if cfg.MCPAddr != "0.0.0.0:8080" {
+		t.Fatalf("MCPAddr = %q", cfg.MCPAddr)
 	}
-	if cfg.OIDCJWKSURL != "https://project.supabase.co/auth/v1/.well-known/jwks.json" {
-		t.Fatalf("OIDCJWKSURL = %q", cfg.OIDCJWKSURL)
-	}
-}
-
-func TestLoadDefaultsToNoSupabaseOAuthProviders(t *testing.T) {
-	clearConfigEnv(t)
-	envPath := writeDotenv(t, `
-INTERVALS_ICU_API_KEY=secret
-INTERVALS_ICU_ATHLETE_ID=i123
-MCP_PUBLIC_URL=https://mcp.example.com
-SUPABASE_URL=https://project.supabase.co
-SUPABASE_ANON_KEY=anon
-OIDC_ALLOWED_EMAIL=me@example.com
-`)
-
-	cfg, _, err := LoadDiscovered(DiscoveryOptions{EnvPath: envPath, EnvExplicit: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.SupabaseOAuthProviders) != 0 {
-		t.Fatalf("SupabaseOAuthProviders = %#v, want none", cfg.SupabaseOAuthProviders)
-	}
-}
-
-func TestLoadParsesExplicitSupabaseOAuthProviders(t *testing.T) {
-	clearConfigEnv(t)
-	envPath := writeDotenv(t, `
-INTERVALS_ICU_API_KEY=secret
-INTERVALS_ICU_ATHLETE_ID=i123
-MCP_PUBLIC_URL=https://mcp.example.com
-SUPABASE_URL=https://project.supabase.co
-SUPABASE_ANON_KEY=anon
-SUPABASE_OAUTH_PROVIDERS=github, google,,azure
-OIDC_ALLOWED_EMAIL=me@example.com
-`)
-
-	cfg, _, err := LoadDiscovered(DiscoveryOptions{EnvPath: envPath, EnvExplicit: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"github", "google", "azure"}
-	if !slices.Equal(cfg.SupabaseOAuthProviders, want) {
-		t.Fatalf("SupabaseOAuthProviders = %#v, want %#v", cfg.SupabaseOAuthProviders, want)
-	}
-}
-
-func TestValidateRequiresSingleUserGate(t *testing.T) {
-	cfg := Config{
-		IntervalsAPIKey:    "secret",
-		IntervalsAthleteID: "i123",
-		IntervalsBaseURL:   "https://intervals.icu",
-		MCPPublicURL:       "https://mcp.example.com",
-		SupabaseURL:        "https://project.supabase.co",
-		SupabaseAnonKey:    "anon",
-		OIDCIssuerURL:      "https://project.supabase.co/auth/v1",
-		OIDCJWKSURL:        "https://project.supabase.co/auth/v1/.well-known/jwks.json",
-		OIDCAudience:       "authenticated",
-		RequestTimeout:     defaultRequestTimeout,
-		ShutdownTimeout:    defaultRequestTimeout,
-	}
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate() succeeded without allowed email or subject")
+	if cfg.ShutdownTimeout != defaultShutdownTimeout {
+		t.Fatalf("ShutdownTimeout = %s", cfg.ShutdownTimeout)
 	}
 }
 
@@ -252,17 +187,6 @@ func clearConfigEnv(t *testing.T) {
 		"INTERVALS_ICU_ATHLETE_ID",
 		"INTERVALS_ICU_BASE_URL",
 		"MCP_ADDR",
-		"MCP_PUBLIC_URL",
-		"MCP_REQUIRED_SCOPE",
-		"SUPABASE_URL",
-		"SUPABASE_ANON_KEY",
-		"SUPABASE_PUBLISHABLE_KEY",
-		"SUPABASE_OAUTH_PROVIDERS",
-		"OIDC_ISSUER_URL",
-		"OIDC_JWKS_URL",
-		"OIDC_AUDIENCE",
-		"OIDC_ALLOWED_EMAIL",
-		"OIDC_ALLOWED_SUBJECT",
 		"REQUEST_TIMEOUT",
 		"SHUTDOWN_TIMEOUT",
 	} {
