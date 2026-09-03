@@ -11,8 +11,15 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// defaultAthleteCacheTTL bounds how long the athlete profile is reused. Nearly
+// every tool resolves "today" through the athlete's timezone, so without this
+// each one pays a round trip for a value that almost never changes. The TTL is
+// short because `intervals mcp stdio` can run for days on a laptop.
+const defaultAthleteCacheTTL = 10 * time.Minute
 
 var ErrNotFound = errors.New("intervals resource not found")
 
@@ -22,6 +29,13 @@ type Client struct {
 	athleteID string
 	http      *http.Client
 	timeout   time.Duration
+
+	athleteTTL time.Duration
+	now        func() time.Time
+
+	athleteMu        sync.Mutex
+	athlete          *Athlete
+	athleteFetchedAt time.Time
 }
 
 type Config struct {
@@ -30,6 +44,13 @@ type Config struct {
 	AthleteID  string
 	HTTPClient *http.Client
 	Timeout    time.Duration
+
+	// AthleteCacheTTL overrides how long GetAthlete reuses a cached profile.
+	// Zero selects defaultAthleteCacheTTL; a negative value disables caching.
+	AthleteCacheTTL time.Duration
+
+	// Now overrides the clock used to expire the athlete cache, for tests.
+	Now func() time.Time
 }
 
 type APIError struct {
@@ -63,12 +84,22 @@ func NewClient(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
+	athleteTTL := cfg.AthleteCacheTTL
+	if athleteTTL == 0 {
+		athleteTTL = defaultAthleteCacheTTL
+	}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &Client{
-		baseURL:   baseURL,
-		apiKey:    cfg.APIKey,
-		athleteID: cfg.AthleteID,
-		http:      client,
-		timeout:   timeout,
+		baseURL:    baseURL,
+		apiKey:     cfg.APIKey,
+		athleteID:  cfg.AthleteID,
+		http:       client,
+		timeout:    timeout,
+		athleteTTL: athleteTTL,
+		now:        now,
 	}, nil
 }
 
@@ -76,7 +107,32 @@ func (c *Client) AthleteID() string {
 	return c.athleteID
 }
 
+// GetAthlete returns the athlete profile, reusing a cached copy for
+// AthleteCacheTTL. The lock is held across the fetch so that concurrent
+// callers collapse into one request instead of stampeding the API. Callers get
+// a copy, so a cached profile can never be mutated through a returned pointer.
 func (c *Client) GetAthlete(ctx context.Context) (*Athlete, error) {
+	if c.athleteTTL < 0 {
+		return c.fetchAthlete(ctx)
+	}
+
+	c.athleteMu.Lock()
+	defer c.athleteMu.Unlock()
+	if c.athlete != nil && c.now().Sub(c.athleteFetchedAt) < c.athleteTTL {
+		cached := *c.athlete
+		return &cached, nil
+	}
+	athlete, err := c.fetchAthlete(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.athlete = athlete
+	c.athleteFetchedAt = c.now()
+	cached := *athlete
+	return &cached, nil
+}
+
+func (c *Client) fetchAthlete(ctx context.Context) (*Athlete, error) {
 	var athlete Athlete
 	if err := c.get(ctx, c.athletePath(), nil, &athlete); err != nil {
 		return nil, err

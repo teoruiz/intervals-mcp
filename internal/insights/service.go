@@ -34,21 +34,28 @@ func New(client IntervalsClient) *Service {
 
 func (s *Service) TodayContext(ctx context.Context, args TodayArgs) (TodayContext, error) {
 	athlete, date, tz := s.resolveDate(ctx, args.Date)
-	activities, err := s.client.ListActivities(ctx, date, date, 20)
-	if err != nil {
-		return TodayContext{}, fmt.Errorf("list today's activities: %w", err)
-	}
-	recovery, err := s.client.GetWellness(ctx, date)
-	if err != nil {
-		return TodayContext{}, fmt.Errorf("get recovery: %w", err)
-	}
-	summary, err := s.summaryForDate(ctx, date)
-	if err != nil {
+
+	var (
+		activities []intervals.Activity
+		recovery   *intervals.Wellness
+		summary    *intervals.Summary
+		events     []intervals.Event
+	)
+	if err := gather(ctx,
+		fetch(&activities, "list today's activities", func(ctx context.Context) ([]intervals.Activity, error) {
+			return s.client.ListActivities(ctx, date, date, 20)
+		}),
+		fetch(&recovery, "get recovery", func(ctx context.Context) (*intervals.Wellness, error) {
+			return s.client.GetWellness(ctx, date)
+		}),
+		fetch(&summary, "get athlete summary", func(ctx context.Context) (*intervals.Summary, error) {
+			return s.summaryForDate(ctx, date)
+		}),
+		fetch(&events, "list calendar", func(ctx context.Context) ([]intervals.Event, error) {
+			return s.client.ListEvents(ctx, date, date, nil, 20)
+		}),
+	); err != nil {
 		return TodayContext{}, err
-	}
-	events, err := s.client.ListEvents(ctx, date, date, nil, 20)
-	if err != nil {
-		return TodayContext{}, fmt.Errorf("list calendar: %w", err)
 	}
 
 	var last *intervals.Activity
@@ -97,17 +104,28 @@ func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*ActivityDet
 	if strings.TrimSpace(args.ID) == "" {
 		return nil, errors.New("id is required")
 	}
-	activity, err := s.client.GetActivity(ctx, args.ID, args.IncludeIntervals)
-	if err != nil {
-		return nil, fmt.Errorf("get activity: %w", err)
+	var (
+		activity *intervals.Activity
+		streams  []intervals.ActivityStream
+	)
+	tasks := []func(context.Context) error{
+		fetch(&activity, "get activity", func(ctx context.Context) (*intervals.Activity, error) {
+			return s.client.GetActivity(ctx, args.ID, args.IncludeIntervals)
+		}),
 	}
+	// Streams are keyed by the same id, so they do not wait on the activity.
+	if args.IncludeRunningDynamics {
+		tasks = append(tasks, fetch(&streams, "get activity streams", func(ctx context.Context) ([]intervals.ActivityStream, error) {
+			return s.client.GetActivityStreams(ctx, args.ID, intervals.RunningDynamicsStreamTypes())
+		}))
+	}
+	if err := gather(ctx, tasks...); err != nil {
+		return nil, err
+	}
+
 	detail := &ActivityDetail{Activity: activity}
 	if args.IncludeRunningDynamics {
 		dynamics := intervals.RunningDynamicsFromActivity(activity)
-		streams, err := s.client.GetActivityStreams(ctx, args.ID, intervals.RunningDynamicsStreamTypes())
-		if err != nil {
-			return nil, fmt.Errorf("get activity streams: %w", err)
-		}
 		dynamics = intervals.MergeRunningDynamics(dynamics, intervals.AggregateRunningDynamics(streams))
 		detail.RunningDynamics = &dynamics
 		if args.IncludeIntervals {
@@ -119,12 +137,19 @@ func (s *Service) Activity(ctx context.Context, args ActivityArgs) (*ActivityDet
 
 func (s *Service) Recovery(ctx context.Context, args RecoveryArgs) (RecoveryContext, error) {
 	_, date, _ := s.resolveDate(ctx, args.Date)
-	recovery, err := s.client.GetWellness(ctx, date)
-	if err != nil {
-		return RecoveryContext{}, fmt.Errorf("get wellness: %w", err)
-	}
-	summary, err := s.summaryForDate(ctx, date)
-	if err != nil {
+
+	var (
+		recovery *intervals.Wellness
+		summary  *intervals.Summary
+	)
+	if err := gather(ctx,
+		fetch(&recovery, "get wellness", func(ctx context.Context) (*intervals.Wellness, error) {
+			return s.client.GetWellness(ctx, date)
+		}),
+		fetch(&summary, "get athlete summary", func(ctx context.Context) (*intervals.Summary, error) {
+			return s.summaryForDate(ctx, date)
+		}),
+	); err != nil {
 		return RecoveryContext{}, err
 	}
 	return RecoveryContext{
@@ -196,17 +221,23 @@ func (s *Service) Search(ctx context.Context, args SearchArgs) (SearchResult, er
 		upcoming = start.AddDate(0, 0, 14).Format(time.DateOnly)
 	}
 
-	activities, err := s.client.ListActivities(ctx, oldest, newest, 50)
-	if err != nil {
-		return SearchResult{}, fmt.Errorf("search activities: %w", err)
-	}
-	events, err := s.client.ListEvents(ctx, today, upcoming, nil, 50)
-	if err != nil {
-		return SearchResult{}, fmt.Errorf("search events: %w", err)
-	}
-	recovery, err := s.client.GetWellness(ctx, today)
-	if err != nil {
-		return SearchResult{}, fmt.Errorf("search recovery: %w", err)
+	var (
+		activities []intervals.Activity
+		events     []intervals.Event
+		recovery   *intervals.Wellness
+	)
+	if err := gather(ctx,
+		fetch(&activities, "search activities", func(ctx context.Context) ([]intervals.Activity, error) {
+			return s.client.ListActivities(ctx, oldest, newest, 50)
+		}),
+		fetch(&events, "search events", func(ctx context.Context) ([]intervals.Event, error) {
+			return s.client.ListEvents(ctx, today, upcoming, nil, 50)
+		}),
+		fetch(&recovery, "search recovery", func(ctx context.Context) (*intervals.Wellness, error) {
+			return s.client.GetWellness(ctx, today)
+		}),
+	); err != nil {
+		return SearchResult{}, err
 	}
 
 	var records []SearchRecord
@@ -300,7 +331,7 @@ func (s *Service) resolveDate(ctx context.Context, explicit string) (*intervals.
 func (s *Service) summaryForDate(ctx context.Context, date string) (*intervals.Summary, error) {
 	summaries, err := s.client.GetAthleteSummary(ctx, date, date)
 	if err != nil {
-		return nil, fmt.Errorf("get athlete summary: %w", err)
+		return nil, err
 	}
 	if len(summaries) == 0 {
 		return nil, nil

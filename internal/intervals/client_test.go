@@ -6,7 +6,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestListActivitiesRequest(t *testing.T) {
@@ -164,5 +167,147 @@ func jsonResponse(status int, body string) *http.Response {
 		StatusCode: status,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func athleteCacheClient(t *testing.T, cfg Config) (*Client, *atomic.Int64) {
+	t.Helper()
+	var calls atomic.Int64
+	cfg.BaseURL = "https://intervals.test"
+	cfg.APIKey = "secret"
+	cfg.AthleteID = "i123"
+	cfg.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/v1/athlete/i123" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		calls.Add(1)
+		return jsonResponse(200, `{"id":"i123","name":"Teo","timezone":"Europe/Madrid"}`), nil
+	})}
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client, &calls
+}
+
+func TestGetAthleteServesRepeatCallsFromCache(t *testing.T) {
+	client, calls := athleteCacheClient(t, Config{AthleteCacheTTL: time.Hour})
+
+	for range 5 {
+		athlete, err := client.GetAthlete(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if athlete.Timezone != "Europe/Madrid" {
+			t.Fatalf("Timezone = %q", athlete.Timezone)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("upstream calls = %d, want 1", got)
+	}
+}
+
+func TestGetAthleteRefetchesAfterTTL(t *testing.T) {
+	now := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	client, calls := athleteCacheClient(t, Config{
+		AthleteCacheTTL: time.Minute,
+		Now:             func() time.Time { return now },
+	})
+
+	if _, err := client.GetAthlete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(59 * time.Second)
+	if _, err := client.GetAthlete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls before expiry = %d, want 1", got)
+	}
+
+	now = now.Add(2 * time.Second)
+	if _, err := client.GetAthlete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("calls after expiry = %d, want 2", got)
+	}
+}
+
+func TestGetAthleteNegativeTTLDisablesCache(t *testing.T) {
+	client, calls := athleteCacheClient(t, Config{AthleteCacheTTL: -1})
+
+	for range 3 {
+		if _, err := client.GetAthlete(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("upstream calls = %d, want 3", got)
+	}
+}
+
+// Concurrent callers must collapse into a single upstream request; this is the
+// burst that today_context and search now produce.
+func TestGetAthleteConcurrentCallersShareOneRequest(t *testing.T) {
+	client, calls := athleteCacheClient(t, Config{AthleteCacheTTL: time.Hour})
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			if _, err := client.GetAthlete(context.Background()); err != nil {
+				t.Errorf("GetAthlete: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("upstream calls = %d, want 1", got)
+	}
+}
+
+func TestGetAthleteReturnsCopyOfCachedProfile(t *testing.T) {
+	client, _ := athleteCacheClient(t, Config{AthleteCacheTTL: time.Hour})
+
+	first, err := client.GetAthlete(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Timezone = "Antarctica/Troll"
+
+	second, err := client.GetAthlete(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Timezone != "Europe/Madrid" {
+		t.Fatalf("cache was mutated through returned pointer: %q", second.Timezone)
+	}
+}
+
+func TestGetAthleteDoesNotCacheFailures(t *testing.T) {
+	var calls atomic.Int64
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			return jsonResponse(500, `boom`), nil
+		}
+		return jsonResponse(200, `{"id":"i123","timezone":"Europe/Madrid"}`), nil
+	})}
+	client, err := NewClient(Config{
+		BaseURL: "https://intervals.test", APIKey: "secret", AthleteID: "i123",
+		HTTPClient: httpClient, AthleteCacheTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.GetAthlete(context.Background()); err == nil {
+		t.Fatal("expected first call to fail")
+	}
+	athlete, err := client.GetAthlete(context.Background())
+	if err != nil {
+		t.Fatalf("second call should retry after a failure: %v", err)
+	}
+	if athlete.Timezone != "Europe/Madrid" {
+		t.Fatalf("Timezone = %q", athlete.Timezone)
 	}
 }
