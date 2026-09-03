@@ -1,6 +1,6 @@
 module github.com/teoruiz/intervals-mcp
 
-go 1.26.3
+go 1.27.1
 
 require (
 	github.com/charmbracelet/huh v1.0.0

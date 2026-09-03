@@ -1,6 +1,6 @@
 # Cloudflare Containers require linux/amd64; build with
 # --platform=linux/amd64 (see `make docker-build`).
-ARG GO_VERSION=1.26.3
+ARG GO_VERSION=1.27.1
 FROM golang:${GO_VERSION}-bookworm AS builder
 
 WORKDIR /usr/src/app

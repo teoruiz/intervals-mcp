@@ -1,6 +1,6 @@
 # Agent Notes
 
-- This is a Go 1.26.3 project for a read-only MCP server fronting Intervals.icu, deployed as a Cloudflare Worker (GitHub OAuth) + Container.
+- This is a Go 1.27.1 project for a read-only MCP server fronting Intervals.icu, deployed as a Cloudflare Worker (GitHub OAuth) + Container.
 - Main server entrypoint: `cmd/intervals-mcp`; CLI entrypoint: `cmd/intervals-cli`.
 - Worker sources live in `worker/src` (OAuth, allowlist, container proxying) and tests in `worker/test`. `wrangler.jsonc` and `Dockerfile` define the deployment.
 - Reuse existing config, Intervals client, and insights layers instead of duplicating API calls: `internal/config`, `internal/intervals`, `internal/insights`.

@@ -14,7 +14,7 @@ The server runs unauthenticated on your machine, or in a Cloudflare Container
 behind a Worker that handles GitHub OAuth and an explicit user allowlist.
 The CLI uses the same read-only Intervals.icu client as the MCP server.
 
-You need Go 1.26.3, or the version declared in `go.mod`, plus an Intervals.icu
+You need Go 1.27.1, or the version declared in `go.mod`, plus an Intervals.icu
 API key and athlete id.
 
 Install the unified CLI with:
@@ -433,7 +433,7 @@ them from `.dev.vars`; production takes them from `.env` via
 
 ## Development
 
-Use Go 1.26.3, or the version declared in `go.mod`.
+Use Go 1.27.1, or the version declared in `go.mod`.
 
 ```sh
 make fix
