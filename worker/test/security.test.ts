@@ -1,7 +1,7 @@
 import type { AuthRequest } from "@cloudflare/workers-oauth-provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { authHandler } from "../src/auth";
+import { authHandler, grantUserId } from "../src/auth";
 import {
   allowedGitHubUsers,
   buildContainerRequest,
@@ -244,5 +244,43 @@ describe("GitHub authorization handler", () => {
       "form-action",
     );
     expect(await response.text()).toContain('action="/consent"');
+  });
+
+  it("issues grants under a service-scoped user ID", async () => {
+    const kv = new MemoryKv();
+    const state = "browser-state";
+    kv.values.set(
+      `intervals-auth:${state}`,
+      JSON.stringify({
+        oauthRequest: authRequest(),
+        verifier: "verifier",
+        githubLogin: "alice",
+        githubId: 42,
+      }),
+    );
+    const cookie = await signState(state, "a-long-cookie-signing-secret");
+    const completeAuthorization = vi.fn(async () => ({
+      redirectTo: "https://client.example/callback?code=abc",
+    }));
+    const env = {
+      ...environment(kv),
+      OAUTH_PROVIDER: { completeAuthorization },
+    };
+
+    const response = await authHandler.fetch!(
+      new Request("https://intervals.example/consent", {
+        method: "POST",
+        headers: { cookie: `intervals_auth=${cookie}` },
+        body: new URLSearchParams({ state, decision: "approve" }),
+      }),
+      env as never,
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(302);
+    expect(completeAuthorization).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "intervals-42" }),
+    );
+    expect(grantUserId(42)).not.toContain(":");
   });
 });

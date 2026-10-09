@@ -228,7 +228,9 @@ wrangler kv namespace list
 That namespace is shared with another Worker. Sharing is safe, because each
 Worker pins `resourceMetadata.resource` to its own `/mcp` URL and rejects any
 token whose audience is not exactly that URL, so tokens never cross between
-services. It does couple the two services' OAuth state, so for a clean split
+services. Grants are stored under an `intervals-<github id>` user ID, so
+authorizing one service does not revoke the other's grants for the same client.
+It does couple the two services' OAuth state, so for a clean split
 create a dedicated namespace and put its id in `wrangler.jsonc`:
 
 ```sh

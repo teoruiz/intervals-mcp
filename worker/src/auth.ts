@@ -200,7 +200,7 @@ async function finishConsent(request: Request, env: Env): Promise<Response> {
   );
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
     request: pending.oauthRequest,
-    userId: String(pending.githubId),
+    userId: grantUserId(pending.githubId),
     metadata: { githubLogin: pending.githubLogin },
     scope,
     props: { githubId: pending.githubId, githubLogin: pending.githubLogin },
@@ -213,6 +213,17 @@ async function finishConsent(request: Request, env: Env): Promise<Response> {
       "Cache-Control": "no-store",
     },
   });
+}
+
+// OAUTH_KV is shared with another Worker built on the same provider, and
+// completeAuthorization revokes every existing grant with the same user ID and
+// client. A CIMD client such as ChatGPT presents one client ID and redirect URI
+// to every server, so with a bare GitHub ID as the user ID, authorizing the
+// other service revoked this one's grant and forced a reconnect. Prefixing the
+// user ID keeps each service's grants apart. It must not contain ":", which
+// separates the user ID inside tokens.
+export function grantUserId(githubId: number): string {
+  return `intervals-${githubId}`;
 }
 
 async function getPending(
