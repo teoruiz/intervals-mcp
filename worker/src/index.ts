@@ -6,7 +6,19 @@ import {
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 
 import { authHandler } from "./auth";
-import { buildContainerRequest } from "./security";
+import { buildContainerRequest, isAllowedGitHubUser } from "./security";
+
+// The provider's defaults hard-expire a grant 30 days after consent (refreshing
+// does not extend it) and drop dynamically registered clients after 90 days,
+// which forces MCP clients such as ChatGPT to reconnect. Grants last a year
+// instead, and registrations outlive them so a client registered just before a
+// reconnect still works for the full grant. Access tokens stay short-lived and
+// the allowlist is re-checked on every request, so removing a user from
+// ALLOWED_GITHUB_USERS still cuts them off immediately.
+const DAY_SECONDS = 24 * 60 * 60;
+const ACCESS_TOKEN_TTL = 60 * 60;
+const REFRESH_TOKEN_TTL = 365 * DAY_SECONDS;
+const CLIENT_REGISTRATION_TTL = 2 * REFRESH_TOKEN_TTL;
 
 interface AuthProps {
   githubId: number;
@@ -89,6 +101,13 @@ class McpProxyHandler extends WorkerEntrypoint<Env, AuthProps> {
     const incoming = new URL(request.url);
     if (incoming.pathname !== "/mcp")
       return new Response("Not found", { status: 404 });
+    if (
+      !isAllowedGitHubUser(
+        this.ctx.props.githubLogin,
+        this.env.ALLOWED_GITHUB_USERS,
+      )
+    )
+      return new Response("Forbidden", { status: 403 });
     const proxied = buildContainerRequest(request, this.ctx.props.githubLogin);
     // Timing makes cold starts visible in `wrangler tail`: a request that had
     // to wake the container costs far more than one reaching a running
@@ -136,6 +155,9 @@ function provider(request: Request, env: Env): OAuthProvider<Env> {
     clientRegistrationEndpoint: "/register",
     clientIdMetadataDocumentEnabled: true,
     allowPlainPKCE: false,
+    accessTokenTTL: ACCESS_TOKEN_TTL,
+    refreshTokenTTL: REFRESH_TOKEN_TTL,
+    clientRegistrationTTL: CLIENT_REGISTRATION_TTL,
     scopesSupported: ["mcp:read"],
     resourceMetadata: {
       resource,
