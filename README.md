@@ -225,10 +225,14 @@ wrangler kv namespace list
 ```
 
 `wrangler.jsonc` already points at the account's existing `OAUTH_KV` namespace.
-That namespace is shared with another Worker. Sharing is safe, because each
+That namespace is shared with another Worker. Each
 Worker pins `resourceMetadata.resource` to its own `/mcp` URL and rejects any
 token whose audience is not exactly that URL, so tokens never cross between
-services. It does couple the two services' OAuth state, so for a clean split
+services. Grants use an `intervals-<github id>` user ID so authorizing another
+service with the same GitHub user and ChatGPT client cannot revoke them.
+Existing grants retain their old user ID; reconnect once after deploying this
+change to obtain an isolated grant. The services still share client registrations
+and OAuth storage, so for a clean split
 create a dedicated namespace and put its id in `wrangler.jsonc`:
 
 ```sh

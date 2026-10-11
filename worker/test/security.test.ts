@@ -37,6 +37,7 @@ function authRequest(): AuthRequest {
     scope: ["mcp:read"],
     codeChallenge: "client-challenge",
     codeChallengeMethod: "S256",
+    issuer: "https://intervals.example",
   };
 }
 
@@ -161,6 +162,7 @@ describe("GitHub authorization handler", () => {
     const location = new URL(response.headers.get("location")!);
     expect(location.href).toContain("https://client.example/callback");
     expect(location.searchParams.get("error")).toBe("access_denied");
+    expect(location.searchParams.get("iss")).toBe("https://intervals.example");
     expect(location.searchParams.get("state")).toBe("client-state");
     expect(kv.values.size).toBe(0);
   });

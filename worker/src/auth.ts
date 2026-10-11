@@ -184,6 +184,9 @@ async function finishConsent(request: Request, env: Env): Promise<Response> {
       "The user denied the authorization request",
     );
     redirect.searchParams.set("state", pending.oauthRequest.state);
+    if (pending.oauthRequest.issuer) {
+      redirect.searchParams.set("iss", pending.oauthRequest.issuer);
+    }
     return new Response(null, {
       status: 302,
       headers: {
@@ -200,7 +203,7 @@ async function finishConsent(request: Request, env: Env): Promise<Response> {
   );
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
     request: pending.oauthRequest,
-    userId: String(pending.githubId),
+    userId: grantUserId(pending.githubId),
     metadata: { githubLogin: pending.githubLogin },
     scope,
     props: { githubId: pending.githubId, githubLogin: pending.githubLogin },
@@ -213,6 +216,14 @@ async function finishConsent(request: Request, env: Env): Promise<Response> {
       "Cache-Control": "no-store",
     },
   });
+}
+
+// The shared KV also holds another Worker's grants. The provider revokes grants
+// for the same user and client (and CIMD redirect URI), without checking their
+// resource. ChatGPT can use the same client and redirect across services, so
+// scope the user ID to this service. Colons are reserved by the token format.
+export function grantUserId(githubId: number): string {
+  return `intervals-${githubId}`;
 }
 
 async function getPending(
