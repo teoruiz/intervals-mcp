@@ -230,6 +230,10 @@ Worker pins `resourceMetadata.resource` to its own `/mcp` URL and rejects any
 token whose audience is not exactly that URL, so tokens never cross between
 services. Grants use an `intervals-<github id>` user ID so authorizing another
 service with the same GitHub user and ChatGPT client cannot revoke them.
+Separate consents also keep separate grants: reconnecting on one ChatGPT client
+does not revoke another client's grant, even when they share the same client ID
+and callback URL. Each grant rotates its own refresh tokens and retains its
+one-year lifetime. Removing a user from the allowlist still blocks every session.
 Existing grants retain their old user ID; reconnect once after deploying this
 change to obtain an isolated grant. The services still share client registrations
 and OAuth storage, so for a clean split

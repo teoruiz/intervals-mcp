@@ -262,17 +262,92 @@ describe("OAuth grant isolation and refresh", () => {
     ).toBe(200);
   });
 
-  it("still revokes old grants when reconnecting to Intervals itself", async () => {
+  it("keeps both ChatGPT connections usable when they share a client ID and callback", async () => {
     const intervals = service("https://intervals.example", new MemoryKv());
-    const old = await intervals.connect();
-    await intervals.connect();
-    const response = await intervals.token({
+    const desktop = await intervals.connect();
+    const mobile = await intervals.connect();
+    expect(mobile.refresh_token).not.toBe(desktop.refresh_token);
+
+    // Connecting on mobile must preserve the existing desktop access token.
+    expect(
+      (
+        await intervals.fetch("/mcp", {
+          headers: { authorization: `Bearer ${desktop.access_token}` },
+        })
+      ).status,
+    ).toBe(200);
+
+    const later = Date.now() + 2 * 24 * 60 * 60 * 1000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    const refresh = async (refreshToken: string) => {
+      const response = await intervals.token({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      });
+      expect(response.status).toBe(200);
+      const tokens = (await response.json()) as {
+        access_token: string;
+        refresh_token: string;
+      };
+      expect(
+        (
+          await intervals.fetch("/mcp", {
+            headers: { authorization: `Bearer ${tokens.access_token}` },
+          })
+        ).status,
+      ).toBe(200);
+      return tokens;
+    };
+
+    // Multiple rotations on one connection must not invalidate the other's
+    // untouched refresh token, or its next generation after it does refresh.
+    const desktopFirst = await refresh(desktop.refresh_token);
+    await refresh(desktopFirst.refresh_token);
+    const mobileFirst = await refresh(mobile.refresh_token);
+    const mobileSecond = await refresh(mobileFirst.refresh_token);
+    await refresh(mobileSecond.refresh_token);
+  });
+
+  it("keeps an in-flight authorization code valid when another connection consents", async () => {
+    const intervals = service("https://intervals.example", new MemoryKv());
+    let second!: { access_token: string; refresh_token: string };
+    const first = await intervals.connect(async () => {
+      second = await intervals.connect();
+    });
+    for (const tokens of [first, second]) {
+      expect(
+        (
+          await intervals.fetch("/mcp", {
+            headers: { authorization: `Bearer ${tokens.access_token}` },
+          })
+        ).status,
+      ).toBe(200);
+    }
+  });
+
+  it("still permits explicitly revoking one connection without revoking another", async () => {
+    const intervals = service("https://intervals.example", new MemoryKv());
+    const first = await intervals.connect();
+    const second = await intervals.connect();
+    const beforeRevocation = await intervals.token({
       grant_type: "refresh_token",
-      refresh_token: old.refresh_token,
+      refresh_token: first.refresh_token,
     });
-    expect(response.status).toBe(400);
-    expect((await response.json()) as { error: string }).toMatchObject({
-      error: "invalid_grant",
+    expect(beforeRevocation.status).toBe(200);
+    const revoked = await intervals.token({
+      token: first.refresh_token,
+      token_type_hint: "refresh_token",
     });
+    expect(revoked.status).toBe(200);
+    const old = await intervals.token({
+      grant_type: "refresh_token",
+      refresh_token: first.refresh_token,
+    });
+    expect(old.status).toBe(400);
+    const active = await intervals.token({
+      grant_type: "refresh_token",
+      refresh_token: second.refresh_token,
+    });
+    expect(active.status).toBe(200);
   });
 });

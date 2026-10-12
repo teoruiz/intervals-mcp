@@ -204,6 +204,9 @@ async function finishConsent(request: Request, env: Env): Promise<Response> {
   const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
     request: pending.oauthRequest,
     userId: grantUserId(pending.githubId),
+    // ChatGPT connections can share a CIMD client ID and redirect URI. Keep
+    // each consent's grant so reconnecting one client doesn't sign out another.
+    revokeExistingGrants: false,
     metadata: { githubLogin: pending.githubLogin },
     scope,
     props: { githubId: pending.githubId, githubLogin: pending.githubLogin },
